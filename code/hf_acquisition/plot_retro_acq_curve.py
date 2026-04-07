@@ -200,7 +200,7 @@ def plot_aggregate_curve_only(
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--retro_dir", type=str, default="./retro_acq_runs_tm")
-    ap.add_argument("--methods", type=str, default="hf_only,ar1,ours_mean")
+    ap.add_argument("--methods", type=str, default="hf_only,ar1,ours_mean,random")
     ap.add_argument("--title", type=str, default="")
     ap.add_argument("--out_path", type=str, default="./retro_acq_runs_tm/main_paper_curve_only.png")
     ap.add_argument("--dpi", type=int, default=300)
