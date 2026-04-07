@@ -1,0 +1,28 @@
+name: multi_fidelity
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.10
+  - numpy=2.0
+  - pandas=2.3
+  - scipy=1.15
+  - matplotlib=3.10
+  - scikit-learn=1.7
+  - joblib=1.5
+  - pyyaml=6.0
+  - tqdm=4.67
+  - cython=3.1
+  - numba=0.61
+  - pywavelets=1.8
+  - findiff=0.12
+  - scikit-fda=0.10.1
+  - fdasrsf=2.6.4
+  - scikit-rf=1.2
+  - pytorch=2.5
+  - pytorch-cuda=11.8
+  - gpytorch=1.14
+  - botorch=0.15.1
+  - pyro-ppl=1.9.1
+  - pip
