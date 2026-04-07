@@ -89,7 +89,7 @@ def main() -> None:
     ap.add_argument("--x_invert", type=int, default=1)
     ap.add_argument("--dpi", type=int, default=300)
     ap.add_argument("--rep_mode", type=str, default="mid", choices=["mid","best","worst"])
-    ap.add_argument("--show_inset", type=int, default=1,
+    ap.add_argument("--show_inset", type=int, default=0,
                     help="1: show compact mapping inset (one representative point); 0: no inset.")
     ap.add_argument("--mark_rep_point", type=int, default=1)
     args = ap.parse_args()
