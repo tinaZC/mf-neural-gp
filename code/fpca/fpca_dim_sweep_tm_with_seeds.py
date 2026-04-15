@@ -300,11 +300,12 @@ def nan_record(seed: int, dim: int, run_dir: Path, status: str) -> Dict[str, Any
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="FPCA dim sweep runner with seed support for nanophotonic TM.")
-    ap.add_argument("--train_script", type=str, default="./fpca_dim_sweep_tm_with_seeds.py")
+    ap.add_argument("--train_script", type=str, default="./mf_train_nano_tm_dim_sweep.py")
     ap.add_argument("--data_dir", type=str, default="../../data/mf_sweep_datasets_nano_tm/hf100_lfx10")
     ap.add_argument("--out_root", type=str, default="../../result_out/fpca_dim_sweep_tm_outputs")
-    ap.add_argument("--dims", type=str, default="2,4,6,8,10,12,16,24,32")
-    aap.add_argument("--seeds", type=str, default="42,55,66,77,88,99,111,222,333,555")
+    ap.add_argument("--dims", type=str, default="2,4,6,8,10,12,16,24,32,64")
+    ap.add_argument("--seeds", type=str, default="42,55,66,77,88,99,111,222,333,555")
+
     ap.add_argument("--python_bin", type=str, default="")
 
     ap.add_argument("--fpca_var_ratio", type=float, default=None)

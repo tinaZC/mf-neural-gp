@@ -5,16 +5,24 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-CSV_PATH="${CSV_PATH:-${REPO_ROOT}/result_out/mf_sweep_runs_baseline_nano_tm/sweep_results.csv}"
-EFF_ROOT="${EFF_ROOT:-${REPO_ROOT}/result_out/mf_sweep_runs_baseline_nano_tm/efficiency_out}"
-OUT_DIR="${OUT_DIR:-${REPO_ROOT}/result_out/mf_sweep_runs_baseline_nano_tm/efficiency_out_multi}"
+CODE_ROOT="${CODE_ROOT:-${REPO_ROOT}/code}"
 
-SPEEDUP_SCRIPT="${SPEEDUP_SCRIPT:-${REPO_ROOT}/code/efficiency/make_efficiency_speedup_tables_multi.py}"
-PLOT_SCRIPT="${PLOT_SCRIPT:-${REPO_ROOT}/code/efficiency/plot_efficiency_multi_lfx.py}"
-TABLE_SCRIPT="${TABLE_SCRIPT:-${REPO_ROOT}/code/efficiency/make_efficiency_mapping_table.py}"
+# This script consumes TM baseline sweep outputs, so RUNS_ROOT points to that sweep root.
+RUNS_ROOT="${RUNS_ROOT:-${REPO_ROOT}/result_out/mf_sweep_runs_baseline_nano_tm}"
+
+CSV_PATH="${CSV_PATH:-${RUNS_ROOT}/sweep_results.csv}"
+EFF_ROOT="${EFF_ROOT:-${RUNS_ROOT}/efficiency_out}"
+OUT_DIR="${OUT_DIR:-${RUNS_ROOT}/efficiency_out_multi}"
+
+SPEEDUP_SCRIPT="${SPEEDUP_SCRIPT:-${CODE_ROOT}/efficiency/make_efficiency_speedup_tables_multi.py}"
+PLOT_SCRIPT="${PLOT_SCRIPT:-${CODE_ROOT}/efficiency/plot_efficiency_multi_lfx.py}"
+TABLE_SCRIPT="${TABLE_SCRIPT:-${CODE_ROOT}/efficiency/make_efficiency_mapping_table.py}"
 
 mkdir -p "${EFF_ROOT}"
 mkdir -p "${OUT_DIR}"
+
+echo "[INFO] CODE_ROOT=${CODE_ROOT}"
+echo "[INFO] RUNS_ROOT=${RUNS_ROOT}"
 
 echo "[1/3] Building efficiency speedup curves for lfx=5,10,15..."
 "${PYTHON_BIN}" "${SPEEDUP_SCRIPT}" \

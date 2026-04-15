@@ -5,16 +5,26 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-DATA_ROOT="${DATA_ROOT:-${REPO_ROOT}/data/mf_sweep_datasets_nano_tm}"
-OUT_DIR="${OUT_DIR:-${REPO_ROOT}/result_out/retro_acq_runs_tm}"
+CODE_ROOT="${CODE_ROOT:-${REPO_ROOT}/code}"
 
-RETRO_SCRIPT="${RETRO_SCRIPT:-${REPO_ROOT}/code/hf_acquisition/acquisition_with_baseline_tm.py}"
-PLOT_SCRIPT="${PLOT_SCRIPT:-${REPO_ROOT}/code/hf_acquisition/plot_retro_acq_curve.py}"
-COMPARE_SCRIPT="${COMPARE_SCRIPT:-${REPO_ROOT}/code/nanophotonic_tm/mf_baseline_tm.py}"
+# Main output root for retrospective acquisition.
+RUNS_ROOT="${RUNS_ROOT:-${REPO_ROOT}/result_out/retro_acq_runs_tm}"
+OUT_DIR="${OUT_DIR:-${RUNS_ROOT}}"
+
+DATA_ROOT="${DATA_ROOT:-${REPO_ROOT}/data/mf_sweep_datasets_nano_tm}"
+
+RETRO_SCRIPT="${RETRO_SCRIPT:-${CODE_ROOT}/hf_acquisition/acquisition_with_baseline_tm.py}"
+PLOT_SCRIPT="${PLOT_SCRIPT:-${CODE_ROOT}/hf_acquisition/plot_retro_acq_curve.py}"
+
+# Refactored shared baseline backend
+COMPARE_SCRIPT="${COMPARE_SCRIPT:-${CODE_ROOT}/mf_train_baseline/mf_baseline.py}"
 
 PLOT_OUT_PATH="${PLOT_OUT_PATH:-${OUT_DIR}/_fig_acquisition.png}"
 
 mkdir -p "${OUT_DIR}"
+
+echo "[INFO] CODE_ROOT=${CODE_ROOT}"
+echo "[INFO] OUT_DIR=${OUT_DIR}"
 
 echo "[1/2] Running retrospective HF acquisition..."
 "${PYTHON_BIN}" "${RETRO_SCRIPT}" \

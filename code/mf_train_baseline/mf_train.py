@@ -35,408 +35,53 @@ from __future__ import annotations
 import argparse
 import json
 import csv
-import shlex
+import hashlib
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Dict, Any, Tuple, List
+from typing import Optional, Dict, Any, Tuple, List, Sequence
 
 import numpy as np
 import torch
 import torch.nn as nn
 from sklearn.preprocessing import StandardScaler
-from mf_reducers_shared import make_reducer, reducer_run_tag_from_args
 
-from mf_utils import (
-    # basic
-    set_seed, now_tag, safe_tag, save_pickle, rmse, r2_score, gaussian_nll, gaussian_nlpd, z_from_ci_level, pca_recon_rmse,
-    # wavelength + subsample
-    load_wavelengths, make_even_subsample_indices, pick_y_sub, upsample_y_sub_to_full, build_linear_interp_weights,
-    # uncertainty
-    propagate_subsample_var_to_full_y_var,
-    ci_coverage_y, ci_width_y, calibrate_sigma_scale,
-    # plot
-    plot_case_3curves_spectrum_wv, make_ci_bands_for_curve,
-    # csv
-    CsvLogger,
-    # student training/infer helpers (model can be any nn.Module with forward + extract_features)
-    train_feature_mlp, mlp_predict_and_features,
-    # svgp
-    train_svgp_per_dim, predict_svgp_per_dim, save_svgp_bundle,
-    # data (run-through layout)
-    load_split_block, assert_indices_match,
-    # dbg
-    dbg_block_stats, dbg_student_on_hf_errors,
-)
+try:
+    from .mf_utils import (
+        set_seed, now_tag, safe_tag, save_pickle, rmse, r2_score, gaussian_nll, gaussian_nlpd, z_from_ci_level, pca_recon_rmse,
+        load_wavelengths, make_even_subsample_indices, pick_y_sub, upsample_y_sub_to_full, build_linear_interp_weights,
+        propagate_subsample_var_to_full_y_var,
+        ci_coverage_y, ci_width_y, calibrate_sigma_scale,
+        plot_case_3curves_spectrum, make_ci_bands_for_curve,
+        CsvLogger,
+        train_feature_mlp, mlp_predict_and_features,
+        train_svgp_per_dim, predict_svgp_per_dim, save_svgp_bundle,
+        load_split_block, assert_indices_match,
+        dbg_block_stats, dbg_student_on_hf_errors,
+    )
+except ImportError:
+    from mf_utils import (
+        set_seed, now_tag, safe_tag, save_pickle, rmse, r2_score, gaussian_nll, gaussian_nlpd, z_from_ci_level, pca_recon_rmse,
+        load_wavelengths, make_even_subsample_indices, pick_y_sub, upsample_y_sub_to_full, build_linear_interp_weights,
+        propagate_subsample_var_to_full_y_var,
+        ci_coverage_y, ci_width_y, calibrate_sigma_scale,
+        plot_case_3curves_spectrum, make_ci_bands_for_curve,
+        CsvLogger,
+        train_feature_mlp, mlp_predict_and_features,
+        train_svgp_per_dim, predict_svgp_per_dim, save_svgp_bundle,
+        load_split_block, assert_indices_match,
+        dbg_block_stats, dbg_student_on_hf_errors,
+    )
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_DATA_DIR = str(SCRIPT_DIR / "../../data/mf_sweep_datasets_nano_tm/hf100_lfx10")
-# DEFAULT_DATA_DIR = str(SCRIPT_DIR / "./absorbance_database_500h_10t_1.0")
-DEFAULT_OUT_DIR = str(SCRIPT_DIR / "../../result_out/mf_nanophotonic_tm_dim")
-BEST_CFG_METHOD_COLUMNS = {
-    "fpca": ["var_ratio", "n_components", "max_components", "ridge"],
-    "pgfpca": ["var_ratio", "n_components", "max_components", "ridge", "alpha_grad", "beta_curv", "alpha_var", "weight_smooth_sigma"],
-    "btw": ["latent_dim", "wavelet", "level", "global_ratio", "threshold_rel"],
-    "fae": ["latent_dim", "proj_dim", "basis_dim", "hidden_dim", "epochs", "lr", "lambda_deriv", "lambda_z", "lambda_smooth"],
-    "elastic": ["latent_dim", "warp_ratio", "shift_max_frac", "var_ratio", "align_points", "band_ratio", "deriv_weight", "smooth_window", "template_iters", "warp_repr"],
-}
+DEFAULT_DATA_DIR = ""
+DEFAULT_OUT_DIR = ""
+DEFAULT_RUN_PREFIX = "mf"
 
-
-def _infer_best_cfg_task_name(args: argparse.Namespace) -> str:
-    task = str(getattr(args, "best_reducer_task_name", "")).strip()
-    if task:
-        return task
-    dataset_name = str(getattr(args, "best_reducer_dataset_name", "microwave")).strip() or "microwave"
-    subset_name = str(getattr(args, "best_reducer_subset_name", "hf")).strip() or "hf"
-    response_mode = str(getattr(args, "best_reducer_response_mode", "complex_ri")).strip() or "complex_ri"
-    suffix = "real" if response_mode in ("real", "real_spectrum") else "complex_ri"
-    return f"{dataset_name}__{subset_name}__{suffix}"
-
-
-def _safe_pos_int(x: Any) -> Optional[int]:
-    if x is None:
-        return None
-    try:
-        v = int(round(float(x)))
-    except Exception:
-        return None
-    return v if v > 0 else None
-
-
-def _resolve_reducer_dim_cap(
-    *,
-    method: str,
-    args: argparse.Namespace,
-    row: Optional[Dict[str, Any]] = None,
-) -> Optional[int]:
-    """Resolve per-method effective dimension cap.
-
-    Policy
-    ------
-    1) reducer first chooses an automatic latent dimension;
-    2) if the auto dimension exceeds either the config-table dimension or the user/global max dimension,
-       use the smaller cap.
-
-    For fpca/pgfpca:
-        config cap := min(n_components, max_components) if provided
-        global cap := --fpca_max_dim
-
-    For btw/fae/elastic:
-        config cap := latent_dim from best-config row (if provided)
-        global cap := --{method}_max_dim
-    """
-    method = str(method).lower().strip()
-    row = row or {}
-
-    caps: List[int] = []
-    if method in ("fpca", "pgfpca"):
-        for k in ("n_components", "max_components"):
-            v = _safe_pos_int(row.get(k))
-            if v is not None:
-                caps.append(v)
-        user_cap = _safe_pos_int(getattr(args, "fpca_max_dim", None))
-        if user_cap is not None:
-            caps.append(user_cap)
-
-    elif method == "btw":
-        cfg_cap = _safe_pos_int(row.get("latent_dim"))
-        user_cap = _safe_pos_int(getattr(args, "btw_max_dim", None))
-        legacy_cap = _safe_pos_int(getattr(args, "btw_latent_dim", None))
-        if cfg_cap is not None:
-            caps.append(cfg_cap)
-        if user_cap is not None:
-            caps.append(user_cap)
-        if legacy_cap is not None:
-            caps.append(legacy_cap)
-
-    elif method == "fae":
-        cfg_cap = _safe_pos_int(row.get("latent_dim"))
-        user_cap = _safe_pos_int(getattr(args, "fae_max_dim", None))
-        legacy_cap = _safe_pos_int(getattr(args, "fae_latent_dim", None))
-        if cfg_cap is not None:
-            caps.append(cfg_cap)
-        if user_cap is not None:
-            caps.append(user_cap)
-        if legacy_cap is not None:
-            caps.append(legacy_cap)
-
-    elif method == "elastic":
-        cfg_cap = _safe_pos_int(row.get("latent_dim"))
-        user_cap = _safe_pos_int(getattr(args, "elastic_max_dim", None))
-        legacy_cap = _safe_pos_int(getattr(args, "elastic_amp_dim", None))
-        if cfg_cap is not None:
-            caps.append(cfg_cap)
-        if user_cap is not None:
-            caps.append(user_cap)
-        if legacy_cap is not None:
-            caps.append(legacy_cap)
-
-    return (min(caps) if len(caps) > 0 else None)
-
-
-def _normalize_reducer_dim_args(
-    args: argparse.Namespace,
-    method: str,
-    row: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    """Normalize reducer dimension args.
-
-    Policy:
-      - If user explicitly passes a fixed dim for fpca/pgfpca and we are NOT applying
-        a best-config row, preserve that fixed dim (optionally cap by fpca_max_dim).
-      - Otherwise use auto-dim + cap mode.
-      - For btw/fae/elastic, keep the existing auto-dim + cap behavior.
-    """
-    method = str(method).lower().strip()
-    cap = _resolve_reducer_dim_cap(method=method, args=args, row=row)
-    info: Dict[str, Any] = {
-        "method": method,
-        "effective_dim_cap": cap,
-        "policy": "auto_dim_with_cap",
-    }
-
-    def _set_policy(policy: str) -> None:
-        setattr(args, "reducer_dim_policy", policy)
-        setattr(args, "reducer_dim_cap", 0 if cap is None else int(cap))
-        setattr(args, "best_cfg_dim_cap", 0 if cap is None else int(cap))
-        setattr(args, "best_cfg_policy", policy)
-
-    if method in ("fpca", "pgfpca"):
-        user_fixed_dim = _safe_pos_int(getattr(args, "fpca_dim", None))
-
-        # Preserve explicit fixed-dim requests when not driven by best-config row.
-        if user_fixed_dim is not None and not row:
-            if cap is not None:
-                args.fpca_dim = int(min(user_fixed_dim, int(cap)))
-                args.fpca_max_dim = int(cap)
-                info.update({
-                    "policy": "fixed_dim_with_cap",
-                    "fixed_dim": int(args.fpca_dim),
-                    "cap_arg": "fpca_max_dim",
-                    "fixed_dim_disabled": False,
-                })
-            else:
-                args.fpca_dim = int(user_fixed_dim)
-                info.update({
-                    "policy": "fixed_dim",
-                    "fixed_dim": int(args.fpca_dim),
-                    "fixed_dim_disabled": False,
-                })
-            _set_policy(info["policy"])
-            return info
-
-        # Default / best-config route: auto + cap
-        args.fpca_dim = 0
-        if cap is not None:
-            args.fpca_max_dim = int(cap)
-        info.update({"auto_arg": "fpca_dim", "cap_arg": "fpca_max_dim", "fixed_dim_disabled": True})
-        _set_policy("auto_dim_with_cap")
-        return info
-
-    # Generic aliases for downstream shared reducer utilities.
-    _set_policy("auto_dim_with_cap")
-
-    if method == "btw":
-        args.btw_latent_dim = 0
-        if cap is not None:
-            args.btw_max_dim = int(cap)
-        setattr(args, "btw_dim_cap", 0 if cap is None else int(cap))
-        info.update({"auto_arg": "btw_latent_dim", "cap_arg": "btw_max_dim", "fixed_dim_disabled": True})
-
-    elif method == "fae":
-        args.fae_latent_dim = 0
-        if cap is not None:
-            args.fae_max_dim = int(cap)
-        setattr(args, "fae_dim_cap", 0 if cap is None else int(cap))
-        info.update({"auto_arg": "fae_latent_dim", "cap_arg": "fae_max_dim", "fixed_dim_disabled": True})
-
-    elif method == "elastic":
-        args.elastic_amp_dim = 0
-        if cap is not None:
-            args.elastic_max_dim = int(cap)
-        setattr(args, "elastic_dim_cap", 0 if cap is None else int(cap))
-        info.update({"auto_arg": "elastic_amp_dim", "cap_arg": "elastic_max_dim", "fixed_dim_disabled": True})
-
-    return info
-
-
-def _best_cfg_csv_to_overrides(method: str, row: Dict[str, Any]) -> Tuple[List[str], Dict[str, Any], List[str]]:
-    cli: List[str] = []
-    applied: Dict[str, Any] = {}
-    ignored: List[str] = []
-
-    INT_FLAGS = {
-        "--fpca_dim",
-        "--fpca_max_dim",
-        "--btw_latent_dim",
-        "--btw_level",
-        "--fae_latent_dim",
-        "--fae_proj_dim",
-        "--fae_basis_dim",
-        "--fae_hidden_dim",
-        "--fae_epochs",
-        "--fae_batch_size",
-        "--elastic_amp_dim",
-    }
-    FLOAT_FLAGS = {
-        "--fpca_var_ratio",
-        "--fpca_ridge",
-        "--pgfpca_alpha_grad",
-        "--pgfpca_beta_curv",
-        "--btw_global_ratio",
-        "--btw_threshold_rel",
-        "--fae_lr",
-        "--fae_weight_decay",
-        "--fae_lambda_deriv",
-        "--fae_lambda_z",
-        "--fae_lambda_smooth",
-        "--elastic_shift_max_frac",
-    }
-
-    def _is_bad_number(x: Any) -> bool:
-        return isinstance(x, float) and (np.isnan(x) or np.isinf(x))
-
-    def _as_int(x: Any) -> Optional[int]:
-        if x is None or _is_bad_number(x):
-            return None
-        try:
-            return int(round(float(x)))
-        except Exception:
-            return None
-
-    def _add(flag: str, value: Any):
-        if value is None:
-            return
-        if _is_bad_number(value):
-            return
-        if isinstance(value, str) and (not value.strip()):
-            return
-        try:
-            if flag in INT_FLAGS:
-                v = int(round(float(value)))
-                cli.extend([flag, str(v)])
-                applied[flag.lstrip('-')] = v
-            elif flag in FLOAT_FLAGS:
-                v = float(value)
-                cli.extend([flag, f"{v:.12g}"])
-                applied[flag.lstrip('-')] = v
-            else:
-                v = str(value).strip()
-                if not v:
-                    return
-                cli.extend([flag, v])
-                applied[flag.lstrip('-')] = v
-        except Exception:
-            ignored.append(flag.lstrip('-'))
-
-    if method in ("fpca", "pgfpca"):
-        cap_candidates: List[int] = []
-        n_components = _as_int(row.get("n_components"))
-        max_components = _as_int(row.get("max_components"))
-        if n_components is not None and n_components > 0:
-            cap_candidates.append(n_components)
-        if max_components is not None and max_components > 0:
-            cap_candidates.append(max_components)
-
-        _add("--fpca_dim", 0)
-        _add("--fpca_var_ratio", row.get("var_ratio"))
-        if cap_candidates:
-            cap = int(min(cap_candidates))
-            _add("--fpca_max_dim", cap)
-            applied["best_cfg_dim_cap"] = cap
-        _add("--fpca_ridge", row.get("ridge"))
-        applied["best_cfg_policy"] = "auto_dim_with_cap"
-
-        if method == "pgfpca":
-            _add("--pgfpca_alpha_grad", row.get("alpha_grad"))
-            _add("--pgfpca_beta_curv", row.get("beta_curv"))
-            for k in ["alpha_var", "weight_smooth_sigma"]:
-                v = row.get(k)
-                if v is not None and not _is_bad_number(v):
-                    ignored.append(k)
-
-    elif method == "btw":
-        latent_dim = _as_int(row.get("latent_dim"))
-        _add("--btw_latent_dim", 0)
-        if latent_dim is not None and latent_dim > 0:
-            _add("--btw_max_dim", latent_dim)
-            applied["best_cfg_dim_cap"] = latent_dim
-        applied["best_cfg_policy"] = "auto_dim_with_cap"
-        _add("--btw_wavelet", row.get("wavelet"))
-        _add("--btw_level", row.get("level"))
-        _add("--btw_global_ratio", row.get("global_ratio"))
-        _add("--btw_threshold_rel", row.get("threshold_rel"))
-
-    elif method == "fae":
-        latent_dim = _as_int(row.get("latent_dim"))
-        _add("--fae_latent_dim", 0)
-        if latent_dim is not None and latent_dim > 0:
-            _add("--fae_max_dim", latent_dim)
-            applied["best_cfg_dim_cap"] = latent_dim
-        applied["best_cfg_policy"] = "auto_dim_with_cap"
-        _add("--fae_proj_dim", row.get("proj_dim"))
-        _add("--fae_basis_dim", row.get("basis_dim"))
-        _add("--fae_hidden_dim", row.get("hidden_dim"))
-        _add("--fae_epochs", row.get("epochs"))
-        _add("--fae_batch_size", row.get("batch_size"))
-        _add("--fae_lr", row.get("lr"))
-        _add("--fae_weight_decay", row.get("weight_decay"))
-        _add("--fae_lambda_deriv", row.get("lambda_deriv"))
-        _add("--fae_lambda_z", row.get("lambda_z"))
-        _add("--fae_lambda_smooth", row.get("lambda_smooth"))
-
-    elif method == "elastic":
-        latent_dim = _as_int(row.get("latent_dim"))
-        _add("--elastic_amp_dim", 0)
-        if latent_dim is not None and latent_dim > 0:
-            _add("--elastic_max_dim", latent_dim)
-            applied["best_cfg_dim_cap"] = latent_dim
-        applied["best_cfg_policy"] = "auto_dim_with_cap"
-        if row.get("shift_max_frac") is not None and not _is_bad_number(row.get("shift_max_frac")):
-            _add("--elastic_shift_max_frac", row.get("shift_max_frac"))
-        else:
-            _add("--elastic_shift_max_frac", row.get("warp_ratio"))
-        for k in ["var_ratio", "align_points", "band_ratio", "deriv_weight", "smooth_window", "template_iters", "warp_repr"]:
-            v = row.get(k)
-            if v is not None and not _is_bad_number(v):
-                ignored.append(k)
-
-    return cli, applied, ignored
-
-
-def load_best_reducer_config_rows(best_cfg_csv: Path, task_name: str) -> Dict[str, Dict[str, Any]]:
-    import pandas as pd
-    df = pd.read_csv(best_cfg_csv)
-    if "task_name" not in df.columns:
-        raise ValueError(f"Best config csv must contain task_name column: {best_cfg_csv}")
-    method_col = "method_name" if "method_name" in df.columns else ("method_alias" if "method_alias" in df.columns else "")
-    if not method_col:
-        raise ValueError(f"Best config csv must contain method_name or method_alias column: {best_cfg_csv}")
-    sub = df[df["task_name"].astype(str) == str(task_name)].copy()
-    if sub.empty:
-        available = sorted(df["task_name"].astype(str).unique().tolist())
-        raise ValueError(f"Task '{task_name}' not found in {best_cfg_csv}. Available task_name examples: {available[:10]}")
-    rows: Dict[str, Dict[str, Any]] = {}
-    for _, r in sub.iterrows():
-        method = str(r[method_col]).lower().strip()
-        row = {}
-        for k, v in r.to_dict().items():
-            if isinstance(v, float) and np.isnan(v):
-                continue
-            row[k] = v
-        rows[method] = row
-    return rows
-
-
-def apply_best_reducer_config_to_args(args: argparse.Namespace, method: str, row: Dict[str, Any]) -> Dict[str, Any]:
-    _, applied, ignored = _best_cfg_csv_to_overrides(method, row)
-
-    internal_keys = {"best_cfg_dim_cap", "best_cfg_policy"}
-    for key, value in applied.items():
-        if key in internal_keys:
-            continue
-        setattr(args, key, value)
-
-    _normalize_reducer_dim_args(args, method, row=row)
-    return {"applied": applied, "ignored": ignored, "task_name": row.get("task_name", "")}
+@dataclass
+class TrainDefaults:
+    data_dir: str = DEFAULT_DATA_DIR
+    out_dir: str = DEFAULT_OUT_DIR
+    run_prefix: str = DEFAULT_RUN_PREFIX
 
 # =========================
 # Debug helpers (lightweight)
@@ -503,160 +148,6 @@ def dbg_print_kernel_effective(svgp_bundle: Any, tag: str) -> None:
         print(f"[DEBUG][KERNEL_EFFECTIVE][{tag}] failed: {type(e).__name__}: {e}")
 
 
-
-
-
-
-def _count_local_extrema_1d(y: np.ndarray) -> Tuple[int, int]:
-    y = np.asarray(y, dtype=np.float32).reshape(-1)
-    if y.size < 3:
-        return 0, 0
-    dy = np.diff(y)
-    s = np.sign(dy)
-    for i in range(1, s.size):
-        if s[i] == 0:
-            s[i] = s[i - 1]
-    for i in range(s.size - 2, -1, -1):
-        if s[i] == 0:
-            s[i] = s[i + 1]
-    if s.size < 2:
-        return 0, 0
-    ds = np.diff(s)
-    n_max = int(np.sum(ds < 0))
-    n_min = int(np.sum(ds > 0))
-    return n_max, n_min
-
-
-def _dominant_resonance_width_and_fano(wl: np.ndarray, y: np.ndarray, idx0: int) -> Tuple[float, float]:
-    wl = np.asarray(wl, dtype=np.float32).reshape(-1)
-    y = np.asarray(y, dtype=np.float32).reshape(-1)
-    K = int(y.size)
-    if K <= 2:
-        return 0.0, 0.0
-    idx0 = int(np.clip(idx0, 0, K - 1))
-    baseline = float(np.mean(y))
-    signed_amp = float(y[idx0] - baseline)
-    if abs(signed_amp) < 1e-12:
-        return 0.0, 0.0
-    half_level = baseline + 0.5 * signed_amp
-
-    left = idx0
-    while left > 0:
-        v0 = (y[left - 1] - half_level) * (y[idx0] - half_level)
-        if v0 <= 0:
-            break
-        left -= 1
-
-    right = idx0
-    while right < K - 1:
-        v1 = (y[right + 1] - half_level) * (y[idx0] - half_level)
-        if v1 <= 0:
-            break
-        right += 1
-
-    wl_left = float(wl[left])
-    wl_right = float(wl[right])
-    width = max(0.0, wl_right - wl_left)
-    left_span = max(0.0, float(wl[idx0]) - wl_left)
-    right_span = max(0.0, wl_right - float(wl[idx0]))
-    fano = (right_span - left_span) / (right_span + left_span + 1e-8)
-    return float(width), float(fano)
-
-
-def extract_physics_features_batch(
-    y_batch: np.ndarray,
-    wl: np.ndarray,
-    use_peak: bool = True,
-    use_peak_width: bool = True,
-    use_peak_depth: bool = True,
-    use_peak_count: bool = True,
-    use_band_integral: bool = True,
-    use_slope_curvature: bool = True,
-    use_fano: bool = True,
-) -> Tuple[np.ndarray, List[str]]:
-    """Extract lightweight resonance-aware handcrafted features from spectra."""
-    yb = np.asarray(y_batch, dtype=np.float32)
-    wl = np.asarray(wl, dtype=np.float32).reshape(-1)
-    if yb.ndim != 2:
-        raise ValueError(f"extract_physics_features_batch expects 2D y_batch, got {yb.shape}")
-    if yb.shape[1] != wl.shape[0]:
-        raise ValueError(f"y_batch.shape[1]={yb.shape[1]} != len(wl)={wl.shape[0]}")
-
-    names: List[str] = []
-    feats: List[np.ndarray] = []
-
-    for i in range(yb.shape[0]):
-        y = yb[i]
-        dy = np.gradient(y, wl).astype(np.float32)
-        d2y = np.gradient(dy, wl).astype(np.float32)
-        y_mean = float(np.mean(y))
-        idx_max = int(np.argmax(y))
-        idx_min = int(np.argmin(y))
-        max_dev = abs(float(y[idx_max] - y_mean))
-        min_dev = abs(float(y[idx_min] - y_mean))
-        idx_dom = idx_max if max_dev >= min_dev else idx_min
-        width_dom, fano_dom = _dominant_resonance_width_and_fano(wl, y, idx_dom)
-        n_max, n_min = _count_local_extrema_1d(y)
-        n_res = float(n_max + n_min)
-
-        vec: List[float] = []
-        vec_names: List[str] = []
-
-        if use_peak:
-            vec += [float(wl[idx_dom]), float(y[idx_dom])]
-            vec_names += ["dom_pos", "dom_value"]
-        if use_peak_width:
-            vec += [float(width_dom)]
-            vec_names += ["dom_width"]
-        if use_peak_depth:
-            vec += [float(np.max(y) - np.min(y)), float(y_mean - np.min(y)), float(np.max(y) - y_mean)]
-            vec_names += ["peak_to_peak", "dip_depth", "peak_height"]
-        if use_peak_count:
-            vec += [n_res, float(n_max), float(n_min)]
-            vec_names += ["resonance_count", "n_max", "n_min"]
-        if use_band_integral:
-            vec += [float(np.trapz(y, wl)), float(np.mean(y)), float(np.std(y))]
-            vec_names += ["band_integral", "band_mean", "band_std"]
-        if use_slope_curvature:
-            vec += [float(np.sqrt(np.mean(dy * dy))), float(np.sqrt(np.mean(d2y * d2y))), float(np.max(np.abs(dy))), float(np.max(np.abs(d2y)))]
-            vec_names += ["slope_rms", "curvature_rms", "slope_absmax", "curvature_absmax"]
-        if use_fano:
-            vec += [float(fano_dom)]
-            vec_names += ["fano_asym"]
-
-        if i == 0:
-            names = vec_names
-        feats.append(np.asarray(vec, dtype=np.float32))
-
-    if len(feats) == 0:
-        return np.zeros((0, 0), dtype=np.float32), []
-    return np.stack(feats, axis=0).astype(np.float32), names
-
-# --- Physics feature extraction wrapper for A13-lite ---
-def extract_physics_features_batch_lite(y_batch, wl, scaler=None, **kwargs):
-    phys_feats = []
-    for y in y_batch:
-        vec = []
-        # dominant peak position
-        peak_idx = np.argmax(y)
-        vec.append(wl[peak_idx])
-        # dominant peak value
-        vec.append(y[peak_idx])
-        # band integral
-        vec.append(float(np.trapz(y, wl)))
-        # global mean
-        vec.append(float(np.mean(y)))
-        # global std
-        vec.append(float(np.std(y)))
-        phys_feats.append(vec)
-    phys_feats = np.stack(phys_feats, axis=0)
-
-    if scaler is not None:
-        phys_feats = scaler.transform(phys_feats)
-
-    # 返回 tuple: (phys_feats, phys_feat_names)
-    phys_feat_names = ['peak_pos','peak_val','band_integral','mean','std']
-    return phys_feats, phys_feat_names
 
 
 # ============================================================
@@ -1044,45 +535,118 @@ def fit_affine_rho(lf: np.ndarray, y: np.ndarray, ridge: float = 1e-6, use_inter
     return rho.astype(np.float32), b.astype(np.float32)
 
 def build_run_name(args: argparse.Namespace) -> str:
-    if args.dim_reduce == "fpca":
-        dim_tag = reducer_run_tag_from_args(args)
+    """
+    Short run-name rule (<=10 chars preferred).
+
+    Prefix comes from --run_prefix, e.g.:
+      tm0 / ab0 / mf
+
+    Only append codes for NON-default settings.
+    Common codes:
+      f6    -> fpca fixed dim = 6
+      s50   -> subsample K = 50
+      kb    -> kernel_struct = block
+      kx    -> kernel_struct = xlf_block
+      rb    -> kernel = rbf
+      a0    -> gp_ard = 0
+      m32   -> svgp_M = 32
+      t1k   -> svgp_steps = 1000
+      c0    -> ci_calibrate = 0
+      p1    -> lf_prob = 1
+      o     -> mf_student_lf_source = oracle
+      r43   -> seed = 43
+
+    If too many non-default options make the name longer than 10 chars,
+    fall back to a stable hashed short name: <prefix> + hex suffix.
+    """
+
+    def _num_tag(v: int) -> str:
+        v = int(v)
+        if v >= 1000 and (v % 1000 == 0):
+            return f"{v // 1000}k"
+        return str(v)
+
+    def _ratio_tag(v: float) -> str:
+        s = f"{float(v):.4f}".rstrip("0").rstrip(".")
+        return s.replace("0.", "").replace(".", "p")
+
+    prefix = safe_tag(str(getattr(args, "run_prefix", "mf")).strip())
+    if not prefix:
+        prefix = "mf"
+
+    codes = []
+
+    # dim reduction
+    if str(args.dim_reduce).lower().strip() == "subsample":
+        codes.append(f"s{_num_tag(int(args.subsample_K))}")
     else:
-        dim_tag = f"dimsub_subK{int(args.subsample_K)}"
+        # default FPCA baseline: fpca_dim=0, var_ratio=0.999, max_dim=50
+        if int(args.fpca_dim) > 0:
+            codes.append(f"f{_num_tag(int(args.fpca_dim))}")
+        else:
+            if abs(float(args.fpca_var_ratio) - 0.999) > 1e-12:
+                codes.append(f"v{_ratio_tag(float(args.fpca_var_ratio))}")
+            if int(args.fpca_max_dim) != 50:
+                codes.append(f"u{_num_tag(int(args.fpca_max_dim))}")
 
-    parts = [
-        dim_tag,
-        "feator0",
+    # kernel structure / kernel
+    ks = str(args.kernel_struct).lower().strip()
+    if ks == "block":
+        codes.append("kb")
+    elif ks == "xlf_block":
+        codes.append("kx")
 
-        "featst0",
+    ker = str(args.kernel).lower().strip()
+    if ker == "rbf":
+        codes.append("rb")
+    elif ker != "matern":
+        codes.append(safe_tag(ker)[:2])
 
-        f"k{args.kernel_struct}",
-        f"{args.kernel}" + (f"_nu{str(args.matern_nu).replace('.','p')}" if args.kernel == "matern" else ""),
-        f"ard{int(args.gp_ard)}",
-        f"M{args.svgp_M}",
-        f"steps{args.svgp_steps}",
-        f"seed{args.seed}",
-        f"ci{str(args.ci_level).replace('.','p')}",
-        f"cal{int(args.ci_calibrate)}",
-        "xs1",
+    # GP / SVGP
+    if int(args.gp_ard) != 1:
+        codes.append(f"a{int(args.gp_ard)}")
+    if int(args.svgp_M) != 64:
+        codes.append(f"m{_num_tag(int(args.svgp_M))}")
+    if int(args.svgp_steps) != 2000:
+        codes.append(f"t{_num_tag(int(args.svgp_steps))}")
 
-        f"fact{safe_tag(str(args.student_feat_act))}",
-        f"lat{safe_tag(str(getattr(args, 'student_latent_mode', 'base')))}",
-        f"phys{int(getattr(args, 'phys_feat_enable', 0))}",
-        "z2scaler1",   # marker: second scaler enabled
-    ]
-    return safe_tag("_".join(parts))
+    # UQ / student routing
+    if int(args.ci_calibrate) != 1:
+        codes.append(f"c{int(args.ci_calibrate)}")
+    if int(getattr(args, "lf_prob", 0)) != 0:
+        codes.append(f"p{int(getattr(args, 'lf_prob', 0))}")
+
+    lf_src = str(getattr(args, "mf_student_lf_source", "student")).lower().strip()
+    if lf_src == "oracle":
+        codes.append("o")
+    elif lf_src != "student":
+        codes.append(safe_tag(lf_src)[:1])
+
+    if int(args.seed) != 42:
+        codes.append(f"r{_num_tag(int(args.seed))}")
+
+    name = safe_tag(prefix + "".join(codes))
+    if len(name) <= 10:
+        return name
+
+    digest = hashlib.md5(name.encode("utf-8")).hexdigest()[:7]
+    keep = max(1, 10 - len(digest))
+    return safe_tag(f"{prefix[:keep]}{digest}")[:10]
 
 
-def main():
-    print("[BOOT] mf_train_fpca_sgp_delta_student_lfprob_tm_dim_reducers_bestcfg_full.py is running...")
+def main(argv: Optional[Sequence[str]] = None, defaults: Optional[TrainDefaults] = None):
+    print("[BOOT] mf_train_fpca_band_feat.py is running...")
 
+    d = defaults or TrainDefaults()
     ap = argparse.ArgumentParser()
 
     # --- paths
-    ap.add_argument("--data_dir", type=str, default=DEFAULT_DATA_DIR,
+    ap.add_argument("--data_dir", type=str, default=d.data_dir,
                     help="Dataset root (contains wavelengths.npy and hf/ lf_paired/ lf_unpaired/).")
-    ap.add_argument("--out_dir", type=str, default=DEFAULT_OUT_DIR,
+    ap.add_argument("--out_dir", type=str, default=d.out_dir,
                     help="Output root. A subdir will be created unless --no_subdir=1.")
+    ap.add_argument("--run_prefix", type=str, default=d.run_prefix,
+                    help="Short run prefix used by auto run-name generation, e.g. tm / ab / mf.")
     ap.add_argument("--exp_name", type=str, default="",
                     help="Optional explicit subdir name under out_dir. If empty, auto-generated from config.")
     ap.add_argument("--no_subdir", type=int, default=0, choices=[0, 1],
@@ -1115,48 +679,6 @@ def main():
 
     # --- subsample config
     ap.add_argument("--subsample_K", type=int, default=50)
-
-    # --- latent reducer selection when dim_reduce=fpca
-    ap.add_argument("--reducer_method", type=str, default="fpca",
-                    choices=["fpca", "pgfpca", "btw", "fae", "elastic"],
-                    help="Latent reducer used inside the dim_reduce=fpca branch.")
-    ap.add_argument("--reducer_methods", type=str, default="",
-                    help="Comma-separated latent reducers to run sequentially via subprocess, e.g. fpca,pgfpca,btw,fae,elastic. Leave empty for single-method mode.")
-    ap.add_argument("--use_best_reducer_config", type=int, default=0, choices=[0, 1],
-                    help="If 1, read per-reducer best hyperparameters from --best_reducer_config_csv before running each reducer.")
-    ap.add_argument("--best_reducer_config_csv", type=str, default="",
-                    help="CSV generated by build_reducer_best_cfg_fixed.py, typically reducer_best_param_configs_real.csv or reducer_best_param_configs_complex.csv.")
-    ap.add_argument("--best_reducer_task_name", type=str, default="",
-                    help="Explicit task_name key to lookup in best reducer config csv, e.g. tsmt__hf__real.")
-    ap.add_argument("--best_reducer_dataset_name", type=str, default="tsmt")
-    ap.add_argument("--best_reducer_subset_name", type=str, default="hf")
-    ap.add_argument("--best_reducer_response_mode", type=str, default="real_spectrum")
-    ap.add_argument("--pgfpca_alpha_grad", type=float, default=0.1)
-    ap.add_argument("--pgfpca_beta_curv", type=float, default=0.01)
-    ap.add_argument("--btw_latent_dim", type=int, default=0)
-    ap.add_argument("--btw_max_dim", type=int, default=50,
-                    help="BTW auto latent-dim upper bound. Effective cap = min(auto_dim, config_dim, btw_max_dim).")
-    ap.add_argument("--btw_wavelet", type=str, default="db4")
-    ap.add_argument("--btw_level", type=int, default=3)
-    ap.add_argument("--btw_global_ratio", type=float, default=0.7)
-    ap.add_argument("--btw_threshold_rel", type=float, default=0.01)
-    ap.add_argument("--fae_latent_dim", type=int, default=0)
-    ap.add_argument("--fae_max_dim", type=int, default=64,
-                    help="FAE auto latent-dim upper bound. Effective cap = min(auto_dim, config_dim, fae_max_dim).")
-    ap.add_argument("--fae_proj_dim", type=int, default=64)
-    ap.add_argument("--fae_basis_dim", type=int, default=64)
-    ap.add_argument("--fae_hidden_dim", type=int, default=128)
-    ap.add_argument("--fae_epochs", type=int, default=250)
-    ap.add_argument("--fae_batch_size", type=int, default=64)
-    ap.add_argument("--fae_lr", type=float, default=1e-3)
-    ap.add_argument("--fae_weight_decay", type=float, default=1e-5)
-    ap.add_argument("--fae_lambda_deriv", type=float, default=0.0)
-    ap.add_argument("--fae_lambda_z", type=float, default=1e-4)
-    ap.add_argument("--fae_lambda_smooth", type=float, default=1e-4)
-    ap.add_argument("--elastic_amp_dim", type=int, default=0)
-    ap.add_argument("--elastic_max_dim", type=int, default=50,
-                    help="Elastic auto latent-dim upper bound. Effective cap = min(auto_dim, config_dim, elastic_max_dim).")
-    ap.add_argument("--elastic_shift_max_frac", type=float, default=0.08)
 
     # --- MF input composition
 
@@ -1199,21 +721,6 @@ def main():
     ap.add_argument("--student_act", type=str, default="relu", choices=["relu", "tanh", "gelu"])
     ap.add_argument("--student_feat_act", type=str, default="leakyrelu", choices=["leakyrelu", "identity", "same"])
     ap.add_argument("--student_feat_leaky_slope", type=float, default=0.01)
-    ap.add_argument("--student_latent_mode", type=str, default="base", choices=["base", "fpca_phys"],
-                    help="Stage-II LF representation mode. 'base' uses original reduced LF latent only; 'fpca_phys' augments it with handcrafted physics-aware spectral descriptors.")
-    ap.add_argument("--phys_feat_enable", type=int, default=0, choices=[0, 1],
-                    help="If 1, append handcrafted physics-aware spectral features to LF representations used in Stage-II inputs u.")
-    ap.add_argument("--phys_feat_source", type=str, default="both", choices=["both", "student", "oracle"],
-                    help="Which LF branch receives handcrafted physical features in Stage-II u.")
-    ap.add_argument("--phys_feat_peak", type=int, default=1, choices=[0, 1])
-    ap.add_argument("--phys_feat_peak_width", type=int, default=1, choices=[0, 1])
-    ap.add_argument("--phys_feat_peak_depth", type=int, default=1, choices=[0, 1])
-    ap.add_argument("--phys_feat_peak_count", type=int, default=1, choices=[0, 1])
-    ap.add_argument("--phys_feat_band_integral", type=int, default=1, choices=[0, 1])
-    ap.add_argument("--phys_feat_slope_curvature", type=int, default=1, choices=[0, 1])
-    ap.add_argument("--phys_feat_fano", type=int, default=1, choices=[0, 1])
-    ap.add_argument("--phys_feat_norm", type=str, default="zscore", choices=["none", "zscore"],
-                    help="Normalization for handcrafted physics-aware features before concatenation to LF latent.")
     ap.add_argument("--student_dropout", type=float, default=0.0)
     ap.add_argument("--student_lr", type=float, default=3e-4)
     ap.add_argument("--student_wd", type=float, default=1e-4)
@@ -1263,86 +770,13 @@ def main():
     ap.add_argument("--save_pred_arrays", type=int, default=0, choices=[0, 1],
                     help="If 1, save prediction/uncertainty arrays (val/test) for downstream plotting (e.g., baseline best/worst cases).")
 
-    args = ap.parse_args()
-
-    reducer_methods_raw = str(getattr(args, "reducer_methods", "")).strip()
-    best_cfg_rows: Dict[str, Dict[str, Any]] = {}
-    use_best_cfg = bool(int(getattr(args, "use_best_reducer_config", 0)))
-    best_cfg_task_name = _infer_best_cfg_task_name(args)
-    if use_best_cfg:
-        best_cfg_csv = str(getattr(args, "best_reducer_config_csv", "")).strip()
-        if not best_cfg_csv:
-            raise SystemExit("--use_best_reducer_config=1 requires --best_reducer_config_csv")
-        best_cfg_rows = load_best_reducer_config_rows(Path(best_cfg_csv).expanduser().resolve(), best_cfg_task_name)
-        print(f"[BEST-CFG] loaded task_name={best_cfg_task_name} from {best_cfg_csv} | methods={sorted(best_cfg_rows.keys())}")
-
-    if (args.dim_reduce == "fpca") and reducer_methods_raw:
-        import subprocess, sys
-        methods = [m.strip().lower() for m in reducer_methods_raw.split(",") if m.strip()]
-        methods = list(dict.fromkeys(methods))
-        if len(methods) > 1:
-            if int(args.no_subdir) == 1:
-                raise SystemExit("Multi-reducer mode requires --no_subdir=0 to avoid output collisions.")
-
-            def _strip_flag(argv, flag):
-                out = []
-                skip = False
-                for tok in argv:
-                    if skip:
-                        skip = False
-                        continue
-                    if tok == flag:
-                        skip = True
-                        continue
-                    if tok.startswith(flag + "="):
-                        continue
-                    out.append(tok)
-                return out
-
-            base_argv = sys.argv[1:]
-            for _flag in ["--reducer_methods", "--reducer_method", "--exp_name"]:
-                base_argv = _strip_flag(base_argv, _flag)
-
-            summary_rows = []
-            for method in methods:
-                cmd = [sys.executable, __file__] + base_argv + ["--reducer_method", method]
-                exp_base = str(args.exp_name).strip()
-                one_exp = f"{exp_base}__{method}" if exp_base else method
-                cmd += ["--exp_name", one_exp]
-                if use_best_cfg:
-                    if method not in best_cfg_rows:
-                        raise SystemExit(f"Method '{method}' not found under task_name={best_cfg_task_name} in best reducer config csv")
-                    cfg_cli, cfg_applied, cfg_ignored = _best_cfg_csv_to_overrides(method, best_cfg_rows[method])
-                    cmd += cfg_cli
-                    print(f"[BEST-CFG][{method}] applied={cfg_applied}")
-                    if cfg_ignored:
-                        print(f"[BEST-CFG][{method}] ignored(no matching CLI arg)={cfg_ignored}")
-                print(f"[MULTI-REDUCER] launching method={method}: {' '.join(shlex.quote(x) for x in cmd)}")
-                subprocess.run(cmd, check=True)
-                row = {"reducer_method": method, "exp_name": one_exp}
-                if use_best_cfg:
-                    row["best_config_task_name"] = best_cfg_task_name
-                    row["best_config"] = best_cfg_rows[method]
-                summary_rows.append(row)
-
-            summary_path = Path(args.out_dir).expanduser().resolve() / "multi_reducer_manifest.json"
-            summary_path.write_text(json.dumps(summary_rows, ensure_ascii=False, indent=2), encoding="utf-8")
-            print(f"[MULTI-REDUCER] done -> {summary_path}")
-            return
-        elif len(methods) == 1:
-            args.reducer_method = methods[0]
-
-    if use_best_cfg:
-        method = str(args.reducer_method).lower().strip()
-        if method not in best_cfg_rows:
-            raise SystemExit(f"Method '{method}' not found under task_name={best_cfg_task_name} in best reducer config csv")
-        best_cfg_info = apply_best_reducer_config_to_args(args, method, best_cfg_rows[method])
-        print(f"[BEST-CFG][single] reducer_method={method} task_name={best_cfg_task_name} applied={best_cfg_info['applied']}")
-        if best_cfg_info["ignored"]:
-            print(f"[BEST-CFG][single] ignored(no matching CLI arg)={best_cfg_info['ignored']}")
-    else:
-        best_cfg_info = {"applied": {}, "ignored": [], "task_name": ""}
-
+    args = ap.parse_args(argv)
+    if not str(args.data_dir).strip():
+        raise SystemExit("--data_dir must be provided explicitly (or via wrapper default).")
+    if not str(args.out_dir).strip():
+        raise SystemExit("--out_dir must be provided explicitly (or via wrapper default).")
+    if not str(getattr(args, "run_prefix", "")).strip():
+        raise SystemExit("--run_prefix must be provided explicitly (or via wrapper default).")
     set_seed(int(args.seed))
 
     data_dir = Path(args.data_dir).expanduser().resolve()
@@ -1467,8 +901,6 @@ def main():
         "args": vars(args),
         "data_dir": str(data_dir), "out_dir": str(out_dir),
         "K": K, "xdim": xdim,
-        "best_reducer_config": best_cfg_info,
-        "best_reducer_task_name": best_cfg_task_name if use_best_cfg else "",
     }
     with open(out_dir / "config.json", "w", encoding="utf-8") as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
@@ -1787,12 +1219,10 @@ def main():
     # Stage-II: targets & LF representations
     # -------------------------
     dim_reduce = args.dim_reduce.lower().strip()
-    reducer_method = str(getattr(args, "reducer_method", "fpca")).lower().strip()
 
     # shared
     idx_k: Optional[np.ndarray] = None
     W_full_from_sub: Optional[np.ndarray] = None
-    reducer = None
 
     # fpca path artifacts
     scaler_y: Optional[StandardScaler] = None       # first scaler on y(K)
@@ -1804,29 +1234,28 @@ def main():
     fpca_recon_rmse_hfval: Optional[float] = None
 
     if dim_reduce == "fpca":
-        reducer_dim_info = _normalize_reducer_dim_args(args, reducer_method, row=(best_cfg_rows.get(reducer_method, {}) if use_best_cfg else None))
-        print(
-            f"[REDUCER][DIM] method={reducer_method} "
-            f"policy={reducer_dim_info['policy']} "
-            f"cap={reducer_dim_info['effective_dim_cap']} "
-            f"fixed_dim={reducer_dim_info.get('fixed_dim', '')} "
-            f"auto_arg={reducer_dim_info.get('auto_arg','')} "
-            f"cap_arg={reducer_dim_info.get('cap_arg','')}"
-        )
-        print(f"[REDUCER] method={reducer_method} | fit latent reducer on HF-train y")
+        print("[FPCA] Fit scaler_y (HF-train) then FPCA on scaled HF-train y_hf (K)")
+        print("[FPCA] Then fit scaler_z (HF-train) on FPCA scores z(R) for SVGP target space")
 
-        reducer = make_reducer(
-            method=reducer_method,
-            axis=wl.astype(np.float32),
-            y_dim=int(y_hf_tr.shape[1]),
-            args=args,
-            device=str(device),
+        # 1) scale BEFORE FPCA (HF-train only)
+        scaler_y = StandardScaler(with_mean=True, with_std=True)
+        y_hf_tr_n = scaler_y.fit_transform(y_hf_tr.astype(np.float32)).astype(np.float32)
+
+        # 2) FPCA fit (auto dim by default)
+        fpca = FPCA(
+            n_components=int(args.fpca_dim),
+            var_ratio=float(args.fpca_var_ratio),
+            max_components=int(args.fpca_max_dim),
+            ridge=float(args.fpca_ridge),
+            random_state=int(args.seed),
         )
-        z_hf_tr = reducer.fit_transform(y_hf_tr.astype(np.float32)).astype(np.float32)
+        z_hf_tr = fpca.fit_transform(y_hf_tr_n).astype(np.float32)   # unscaled z
+        R = int(fpca.n_components_)
 
         def to_fpca_z_unscaled(y: np.ndarray) -> np.ndarray:
-            assert reducer is not None
-            return reducer.transform(y.astype(np.float32)).astype(np.float32)
+            assert scaler_y is not None and fpca is not None
+            y_n = scaler_y.transform(y.astype(np.float32)).astype(np.float32)
+            return fpca.transform(y_n).astype(np.float32)
 
         z_hf_va = to_fpca_z_unscaled(y_hf_va)
         z_hf_te = to_fpca_z_unscaled(y_hf_te)
@@ -1839,31 +1268,26 @@ def main():
         z_hat_va_repr = to_fpca_z_unscaled(yhat_lf_va)
         z_hat_te_repr = to_fpca_z_unscaled(yhat_lf_te)
 
-        save_pickle(out_dir / "latent_reducer.pkl", reducer)
+        # save first-layer artifacts
+        save_pickle(out_dir / "scaler_y.pkl", scaler_y)
+        save_pickle(out_dir / "fpca.pkl", fpca)
 
-        fpca_dim_effective = int(getattr(reducer, "latent_dim_", z_hf_tr.shape[1]))
+        fpca_dim_effective = int(R)
+        fpca_evr_sum = float(np.sum(fpca.explained_variance_ratio_)) if fpca.explained_variance_ratio_ is not None else None
+        print(f"[FPCA] R={R} | EVR_sum={fpca_evr_sum:.6f}")
 
-        _evr_sum = getattr(reducer, "explained_variance_ratio_sum_", None)
-        if _evr_sum is None:
-            _evr = getattr(reducer, "explained_variance_ratio_", None)
-            if _evr is not None:
-                fpca_evr_sum = float(np.sum(np.asarray(_evr, dtype=np.float32)))
-            else:
-                fpca_evr_sum = float("nan")
-        else:
-            fpca_evr_sum = float(_evr_sum)
+        # recon RMSE via existing helper (fpca has transform/inverse_transform)
+        fpca_recon_rmse_hftr = pca_recon_rmse(y_hf_tr, scaler_y, fpca)   # helper name kept but fpca-compatible
+        fpca_recon_rmse_hfval = pca_recon_rmse(y_hf_va, scaler_y, fpca)
+        print(f"[FPCA] recon_rmse HF-tr={fpca_recon_rmse_hftr:.6g} | HF-val={fpca_recon_rmse_hfval:.6g}")
 
-        fpca_recon_rmse_hftr = rmse(reducer.inverse_transform(z_hf_tr), y_hf_tr)
-        fpca_recon_rmse_hfval = rmse(reducer.inverse_transform(z_hf_va), y_hf_va)
-        print(f"[REDUCER] latent_dim={fpca_dim_effective} | evr_sum={fpca_evr_sum}")
-        print(f"[REDUCER] recon_rmse HF-tr={fpca_recon_rmse_hftr:.6g} | HF-val={fpca_recon_rmse_hfval:.6g}")
-
-
+        # 3) SECOND LAYER scaler on z (HF-train only)  <-- NEW
         scaler_z = StandardScaler(with_mean=True, with_std=True)
         Y_tr = scaler_z.fit_transform(z_hf_tr).astype(np.float32)
         Y_va = scaler_z.transform(z_hf_va).astype(np.float32)
         Y_te = scaler_z.transform(z_hf_te).astype(np.float32)
 
+        # scale LF representations in the SAME z-space
         z_lf_tr_repr = scaler_z.transform(z_lf_tr_repr).astype(np.float32)
         z_lf_va_repr = scaler_z.transform(z_lf_va_repr).astype(np.float32)
         z_lf_te_repr = scaler_z.transform(z_lf_te_repr).astype(np.float32)
@@ -1871,17 +1295,25 @@ def main():
         z_hat_tr_repr = scaler_z.transform(z_hat_tr_repr).astype(np.float32)
         z_hat_va_repr = scaler_z.transform(z_hat_va_repr).astype(np.float32)
         z_hat_te_repr = scaler_z.transform(z_hat_te_repr).astype(np.float32)
+        # MF calibration removed (no-op)
 
         save_pickle(out_dir / "scaler_z.pkl", scaler_z)
+        print("[FPCA] saved scaler_z.pkl (second-layer target scaler)")
 
         def inv_target_to_y_full(mu_target_scaled: np.ndarray) -> np.ndarray:
-            assert reducer is not None and scaler_z is not None
+            """
+            mu_target_scaled: predicted mean in z_scaled space (after scaler_z)
+            -> unscale to z_unscaled -> FPCA inverse to y_n -> inverse scaler_y -> y
+            """
+            assert scaler_y is not None and fpca is not None and scaler_z is not None
             mu_target_scaled = mu_target_scaled.astype(np.float32)
             z_unscaled = scaler_z.inverse_transform(mu_target_scaled).astype(np.float32)
-            return reducer.inverse_transform(z_unscaled).astype(np.float32)
+            y_n = fpca.inverse_transform(z_unscaled)
+            y = scaler_y.inverse_transform(y_n.astype(np.float32)).astype(np.float32)
+            return y
 
         inv_target_to_y_full_fn = inv_target_to_y_full
-        target_te_ref = Y_te
+        target_te_ref = Y_te  # target space reference is z_scaled
 
     elif dim_reduce == "subsample":
         Ks_int = int(args.subsample_K)
@@ -1945,75 +1377,6 @@ def main():
         print("[STAGE-II] mf_student_lf_source=student | use Stage-I predicted LF_hat")
 
     # -------------------------
-    # A13 hook: FPCA latent + physics-aware handcrafted spectral features
-    # Keep ORIGINAL reduced LF latent for delta/base fitting, and only augment the Stage-II input u.
-    # -------------------------
-    latent_mode = str(getattr(args, "student_latent_mode", "base")).lower().strip()
-    phys_enable = bool(int(getattr(args, "phys_feat_enable", 0))) or (latent_mode == "fpca_phys")
-    phys_source = str(getattr(args, "phys_feat_source", "both")).lower().strip()
-    if phys_source not in ("both", "student", "oracle"):
-        phys_source = "both"
-
-    lf_or_tr_u = np.array(z_lf_tr_repr, copy=True)
-    lf_or_va_u = np.array(z_lf_va_repr, copy=True)
-    lf_or_te_u = np.array(z_lf_te_repr, copy=True)
-    lf_st_tr_u = np.array(z_hat_tr_repr, copy=True)
-    lf_st_va_u = np.array(z_hat_va_repr, copy=True)
-    lf_st_te_u = np.array(z_hat_te_repr, copy=True)
-
-    phys_feat_names: List[str] = []
-    phys_feat_dim = 0
-    phys_scaler = None
-
-    if phys_enable:
-        phys_kwargs = dict(
-            use_peak=bool(int(getattr(args, "phys_feat_peak", 1))),
-            use_peak_width=bool(int(getattr(args, "phys_feat_peak_width", 1))),
-            use_peak_depth=bool(int(getattr(args, "phys_feat_peak_depth", 1))),
-            use_peak_count=bool(int(getattr(args, "phys_feat_peak_count", 1))),
-            use_band_integral=bool(int(getattr(args, "phys_feat_band_integral", 1))),
-            use_slope_curvature=bool(int(getattr(args, "phys_feat_slope_curvature", 1))),
-            use_fano=bool(int(getattr(args, "phys_feat_fano", 1))),
-        )
-        p_or_tr, phys_feat_names = extract_physics_features_batch_lite(y_lf_tr, wl, **phys_kwargs)
-        p_or_va, _ = extract_physics_features_batch_lite(y_lf_va, wl, **phys_kwargs)
-        p_or_te, _ = extract_physics_features_batch_lite(y_lf_te, wl, **phys_kwargs)
-        p_st_tr, _ = extract_physics_features_batch_lite(yhat_lf_tr, wl, **phys_kwargs)
-        p_st_va, _ = extract_physics_features_batch_lite(yhat_lf_va, wl, **phys_kwargs)
-        p_st_te, _ = extract_physics_features_batch_lite(yhat_lf_te, wl, **phys_kwargs)
-
-        phys_feat_dim = int(p_or_tr.shape[1]) if p_or_tr.ndim == 2 else 0
-        if phys_feat_dim <= 0:
-            print("[A13][phys] no handcrafted features extracted; keep base LF latent only")
-        else:
-            if str(getattr(args, "phys_feat_norm", "zscore")).lower() == "zscore":
-                phys_scaler = StandardScaler(with_mean=True, with_std=True)
-                phys_scaler.fit(p_or_tr.astype(np.float32))
-                p_or_tr = phys_scaler.transform(p_or_tr).astype(np.float32)
-                p_or_va = phys_scaler.transform(p_or_va).astype(np.float32)
-                p_or_te = phys_scaler.transform(p_or_te).astype(np.float32)
-                p_st_tr = phys_scaler.transform(p_st_tr).astype(np.float32)
-                p_st_va = phys_scaler.transform(p_st_va).astype(np.float32)
-                p_st_te = phys_scaler.transform(p_st_te).astype(np.float32)
-                save_pickle(out_dir / "scaler_phys_feat.pkl", phys_scaler)
-
-            if phys_source in ("both", "oracle"):
-                lf_or_tr_u = np.concatenate([lf_or_tr_u, p_or_tr], axis=1).astype(np.float32)
-                lf_or_va_u = np.concatenate([lf_or_va_u, p_or_va], axis=1).astype(np.float32)
-                lf_or_te_u = np.concatenate([lf_or_te_u, p_or_te], axis=1).astype(np.float32)
-            if phys_source in ("both", "student"):
-                lf_st_tr_u = np.concatenate([lf_st_tr_u, p_st_tr], axis=1).astype(np.float32)
-                lf_st_va_u = np.concatenate([lf_st_va_u, p_st_va], axis=1).astype(np.float32)
-                lf_st_te_u = np.concatenate([lf_st_te_u, p_st_te], axis=1).astype(np.float32)
-
-            with open(out_dir / "phys_feat_names.json", "w", encoding="utf-8") as f:
-                json.dump({"names": phys_feat_names}, f, ensure_ascii=False, indent=2)
-            np.save(out_dir / "phys_feat_oracle_train.npy", p_or_tr.astype(np.float32))
-            np.save(out_dir / "phys_feat_student_train.npy", p_st_tr.astype(np.float32))
-            print(f"[A13][phys] latent_mode={latent_mode} source={phys_source} feat_dim={phys_feat_dim} | appended to Stage-II u only")
-            print(f"[A13][phys] feature_names={phys_feat_names}")
-
-    # -------------------------
     # Build inputs & standardization for GP
     # -------------------------
     sx = StandardScaler(with_mean=True, with_std=True).fit(x_hf_tr.astype(np.float32))
@@ -2048,30 +1411,31 @@ def main():
     #   + (b) --mf_u_mode flf   (只加 feature)
     #   + (c) --mf_u_mode xflf  (x + feature)
     # ----------------------------
-    lf_or_tr = lf_or_tr_u
-    lf_or_va = lf_or_va_u
-    lf_or_te = lf_or_te_u
+    lf_or_tr = z_lf_tr_repr
+    lf_or_va = z_lf_va_repr
+    lf_or_te = z_lf_te_repr
 
-    lf_st_tr = lf_st_tr_u
-    lf_st_va = lf_st_va_u
-    lf_st_te = lf_st_te_u
+    lf_st_tr = z_hat_tr_repr
+    lf_st_va = z_hat_va_repr
+    lf_st_te = z_hat_te_repr
 
-    mode_u = str(args.mf_u_mode).lower().strip()
-    if mode_u not in ("lf", "xlf", "flf", "xflf", "x", "xhf"):
-        raise ValueError(f"Invalid --mf_u_mode={mode_u}. Choose from: lf/xlf/flf/xflf/x/xhf")
+    mode_u = str(args.mf_u_mode).lower()
+    if mode_u not in ("lf", "xlf", "flf", "x", "xhf"):
+        raise ValueError(f"Invalid --mf_u_mode={mode_u}. Choose from: lf/xlf/flf/x/xhf")
 
     if mode_u == "xhf":
         mode_u = "x"
 
-    use_x = (mode_u in ("xlf", "x", "xflf"))
-    use_lf = (mode_u in ("lf", "xlf", "flf", "xflf"))
+    use_x = (mode_u in ("xlf", "x"))
+    use_lf = (mode_u in ("lf", "xlf", "flf"))
 
-    use_feat_or = (mode_u in ("flf", "xflf"))
-    use_feat_st = (mode_u in ("flf", "xflf"))
+    # only-enable feature for flf (feature replaces x)
+    use_feat_or = (mode_u == "flf")
+    use_feat_st = (mode_u == "flf")
 
-    def _build_u(x_s, lf_repr, feat, use_feat_branch):
+    def _build_u(x_s, lf_repr, feat):
         pieces = []
-        if use_feat_branch:
+        if use_feat_st:
             pieces.append(feat.astype(np.float32))
         if use_x:
             pieces.append(x_s.astype(np.float32))
@@ -2079,13 +1443,13 @@ def main():
             pieces.append(lf_repr.astype(np.float32))
         return np.concatenate(pieces, axis=1).astype(np.float32)
 
-    U_or_tr = _build_u(X_hf_tr_s, lf_or_tr, feat_tr, use_feat_or)
-    U_or_va = _build_u(X_hf_va_s, lf_or_va, feat_va, use_feat_or)
-    U_or_te = _build_u(X_hf_te_s, lf_or_te, feat_te, use_feat_or)
+    U_or_tr = _build_u(X_hf_tr_s, lf_or_tr, feat_tr)
+    U_or_va = _build_u(X_hf_va_s, lf_or_va, feat_va)
+    U_or_te = _build_u(X_hf_te_s, lf_or_te, feat_te)
 
-    U_st_tr = _build_u(X_hf_tr_s, lf_st_tr, feat_tr, use_feat_st)
-    U_st_va = _build_u(X_hf_va_s, lf_st_va, feat_va, use_feat_st)
-    U_st_te = _build_u(X_hf_te_s, lf_st_te, feat_te, use_feat_st)
+    U_st_tr = _build_u(X_hf_tr_s, lf_st_tr, feat_tr)
+    U_st_va = _build_u(X_hf_va_s, lf_st_va, feat_va)
+    U_st_te = _build_u(X_hf_te_s, lf_st_te, feat_te)
 
 
     print(f"[MF][u] U_or_tr={U_or_tr.shape} U_or_va={U_or_va.shape} U_or_te={U_or_te.shape}")
@@ -2216,11 +1580,6 @@ def main():
         "run_name": run_name,
         "timestamp": run_id,
         "dim_reduce": dim_reduce,
-        "reducer_method": reducer_method,
-        "reducer_dim_policy": str(getattr(args, "reducer_dim_policy", "auto_dim_with_cap")),
-        "reducer_dim_cap": int(getattr(args, "reducer_dim_cap", 0)),
-        "best_reducer_task_name": (best_cfg_task_name if use_best_cfg else ""),
-        "best_reducer_config": best_cfg_info,
         "kernel": args.kernel,
         "matern_nu": float(args.matern_nu),
         "kernel_struct": args.kernel_struct,
@@ -2247,11 +1606,6 @@ def main():
             "fpca_ridge": float(args.fpca_ridge),
             "fpca_dim_effective": int(fpca_dim_effective) if fpca_dim_effective is not None else "",
             "second_scaler_z": 1,
-            "reducer_method": reducer_method,
-            "reducer_dim_policy": str(getattr(args, "reducer_dim_policy", "auto_dim_with_cap")),
-            "reducer_dim_cap": int(getattr(args, "reducer_dim_cap", 0)),
-            "best_reducer_task_name": (best_cfg_task_name if use_best_cfg else ""),
-            "best_reducer_config": best_cfg_info,
         })
     else:
         csv_run_meta.update({
@@ -2266,7 +1620,7 @@ def main():
         X_hf_tr_s, X_hf_va_s, X_hf_te_s,
         U_or_tr_s, U_or_va_s, U_or_te_s,
         U_st_tr_s, U_st_va_s, U_st_te_s,
-        dim_reduce=dim_reduce, fpca_dim_effective=fpca_dim_effective,
+        dim_reduce=dim_reduce, fpca_dim_effective=fpca_dim_effective if "fpca_dim_effective" in globals() else None,
     )
     print(f"[DEBUG][StageII][KERNEL_CFG] HF-only : kernel_struct=full ard={ard} kernel={args.kernel} matern_nu={args.matern_nu}")
     print(f"[DEBUG][StageII][KERNEL_CFG] MF-or   : kernel_struct={kernel_struct_or} ard={ard} kernel={args.kernel} matern_nu={args.matern_nu} feat_dim={(feat_dim_or if (kernel_struct_or=='block') else None)}")
@@ -2367,8 +1721,9 @@ def main():
 
             def _lf_repr_from_yraw(y_raw: np.ndarray) -> np.ndarray:
                 if dim_reduce == "fpca":
-                    assert reducer is not None and scaler_z is not None
-                    z = reducer.transform(y_raw.astype(np.float32)).astype(np.float32)
+                    assert fpca is not None and scaler_y is not None and scaler_z is not None
+                    y_n = scaler_y.transform(y_raw.astype(np.float32)).astype(np.float32)
+                    z = fpca.transform(y_n).astype(np.float32)
                     z_s = scaler_z.transform(z).astype(np.float32)
                     return z_s
                 else:
@@ -2395,17 +1750,7 @@ def main():
                     y_samp_raw = _student_y_inv(y_samp_s)
 
                     lf_repr = _lf_repr_from_yraw(y_samp_raw)
-
-                    # A13: when Stage-II student branch was trained with physics-aware augmentation,
-                    # MC prediction must append the SAME handcrafted physics features before su_st.transform().
-                    lf_repr_u = lf_repr
-                    if phys_enable and (phys_feat_dim > 0) and (phys_source in ("both", "student")):
-                        p_samp, _ = extract_physics_features_batch_lite(y_samp_raw, wl, **phys_kwargs)
-                        if phys_scaler is not None:
-                            p_samp = phys_scaler.transform(p_samp.astype(np.float32)).astype(np.float32)
-                        lf_repr_u = np.concatenate([lf_repr, p_samp.astype(np.float32)], axis=1).astype(np.float32)
-
-                    U_samp = _build_u(X_s, lf_repr_u, feat, use_feat_st)
+                    U_samp = _build_u(X_s, lf_repr, feat)
                     U_samp_s = su_st.transform(U_samp).astype(np.float32)
                     mu_res, var_res = predict_svgp_per_dim(svgp_st, U_samp_s, device=device)
 
@@ -2464,9 +1809,10 @@ def main():
     # Propagate variance to full y variance (VAL + TEST)
     # -------------------------
     if dim_reduce == "fpca":
-        assert reducer is not None and scaler_z is not None
+        assert fpca is not None and scaler_y is not None and scaler_z is not None
 
-        scale2_z = (np.asarray(scaler_z.scale_, dtype=np.float32) ** 2)[None, :]
+        # var_* currently is in z_scaled space (after scaler_z). Convert to z_unscaled variance:
+        scale2_z = (np.asarray(scaler_z.scale_, dtype=np.float32) ** 2)[None, :]  # (1, R)
         var_hf_va_z = var_hf_va.astype(np.float32) * scale2_z
         var_or_va_z = var_or_va.astype(np.float32) * scale2_z
         var_st_va_z = var_st_va.astype(np.float32) * scale2_z
@@ -2475,20 +1821,13 @@ def main():
         var_or_te_z = var_or_te.astype(np.float32) * scale2_z
         var_st_te_z = var_st_te.astype(np.float32) * scale2_z
 
-        mu_hf_va_z = scaler_z.inverse_transform(mu_hf_va.astype(np.float32)).astype(np.float32)
-        mu_or_va_z = scaler_z.inverse_transform(mu_or_va.astype(np.float32)).astype(np.float32)
-        mu_st_va_z = scaler_z.inverse_transform(mu_st_va.astype(np.float32)).astype(np.float32)
-        mu_hf_te_z = scaler_z.inverse_transform(mu_hf_te.astype(np.float32)).astype(np.float32)
-        mu_or_te_z = scaler_z.inverse_transform(mu_or_te.astype(np.float32)).astype(np.float32)
-        mu_st_te_z = scaler_z.inverse_transform(mu_st_te.astype(np.float32)).astype(np.float32)
+        var_hf_va_y = fpca_propagate_var_to_y(var_hf_va_z, fpca, scaler_y)
+        var_or_va_y = fpca_propagate_var_to_y(var_or_va_z, fpca, scaler_y)
+        var_st_va_y = fpca_propagate_var_to_y(var_st_va_z, fpca, scaler_y)
 
-        var_hf_va_y = reducer.propagate_var_to_y(var_hf_va_z, mu_hf_va_z)
-        var_or_va_y = reducer.propagate_var_to_y(var_or_va_z, mu_or_va_z)
-        var_st_va_y = reducer.propagate_var_to_y(var_st_va_z, mu_st_va_z)
-
-        var_hf_te_y = reducer.propagate_var_to_y(var_hf_te_z, mu_hf_te_z)
-        var_or_te_y = reducer.propagate_var_to_y(var_or_te_z, mu_or_te_z)
-        var_st_te_y = reducer.propagate_var_to_y(var_st_te_z, mu_st_te_z)
+        var_hf_te_y = fpca_propagate_var_to_y(var_hf_te_z, fpca, scaler_y)
+        var_or_te_y = fpca_propagate_var_to_y(var_or_te_z, fpca, scaler_y)
+        var_st_te_y = fpca_propagate_var_to_y(var_st_te_z, fpca, scaler_y)
 
     else:
         assert W_full_from_sub is not None
@@ -2806,7 +2145,7 @@ def main():
                 f"dim={dim_reduce} | kernel={args.kernel}/{args.kernel_struct}"
             )
 
-            plot_case_3curves_spectrum_wv(
+            plot_case_3curves_spectrum(
                 save_path=f_noci,
                 wl=wl,
                 y_hf_gt=y_hf_gt[ii],
@@ -2830,7 +2169,7 @@ def main():
                 }
                 mf_band_raw = make_ci_bands_for_curve(y_pred_st[ii], std_st_raw[ii], ci_lvl)
 
-                plot_case_3curves_spectrum_wv(
+                plot_case_3curves_spectrum(
                     save_path=f_raw,
                     wl=wl,
                     y_hf_gt=y_hf_gt[ii],
@@ -2842,7 +2181,7 @@ def main():
 
                 mf_band_cal = make_ci_bands_for_curve(y_pred_st[ii], std_st_cal[ii], ci_lvl)
 
-                plot_case_3curves_spectrum_wv(
+                plot_case_3curves_spectrum(
                     save_path=f_cal,
                     wl=wl,
                     y_hf_gt=y_hf_gt[ii],
@@ -2948,11 +2287,6 @@ def main():
         "K": int(K),
         "xdim": int(xdim),
         "dim_reduce": dim_reduce,
-        "reducer_method": reducer_method,
-        "reducer_dim_policy": str(getattr(args, "reducer_dim_policy", "auto_dim_with_cap")),
-        "reducer_dim_cap": int(getattr(args, "reducer_dim_cap", 0)),
-        "best_reducer_task_name": (best_cfg_task_name if use_best_cfg else ""),
-        "best_reducer_config": best_cfg_info,
         "student": {
             "best_val_mse": float(stu_info["meta"]["best_val_mse"]),
             "epochs_ran": int(stu_info["meta"]["epochs_ran"]),
@@ -3080,9 +2414,6 @@ def main():
         "timestamp": run_id,
         "data_dir": str(data_dir),
         "dim_reduce": dim_reduce,
-        "reducer_method": reducer_method,
-        "best_reducer_task_name": (best_cfg_task_name if use_best_cfg else ""),
-        "best_reducer_config": best_cfg_info,
         "kernel": str(args.kernel),
         "matern_nu": float(args.matern_nu),
         "kernel_struct": str(args.kernel_struct),
@@ -3090,8 +2421,8 @@ def main():
         "mf_calib": str("none"),
         "mf_calib_apply": str("both"),
         "mf_u_mode": str(args.mf_u_mode),
-        "use_feature_student": int(use_feat_st),
-        "use_feature_oracle": int(use_feat_or),
+        "use_feature_student": 0,
+        "use_feature_oracle": 0,
         "seed": int(args.seed),
         "K": int(K),
         "xdim": int(xdim),

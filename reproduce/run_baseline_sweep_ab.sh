@@ -5,16 +5,24 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-DATA_ROOT="${DATA_ROOT:-${REPO_ROOT}/data/mf_sweep_datasets_nano_ab}"
+CODE_ROOT="${CODE_ROOT:-${REPO_ROOT}/code}"
+
+# Main output root for AB baseline sweep.
 RUNS_ROOT="${RUNS_ROOT:-${REPO_ROOT}/result_out/mf_sweep_runs_baseline_nano_ab}"
 PLOT_OUT_DIR="${PLOT_OUT_DIR:-${RUNS_ROOT}/plot_baseline_nano_ab}"
 
-TRAIN_SCRIPT="${TRAIN_SCRIPT:-${REPO_ROOT}/code/nanophotonic_ab/mf_baseline_ab.py}"
-SWEEP_SCRIPT="${SWEEP_SCRIPT:-${REPO_ROOT}/code/nanophotonic_ab/run_sweep_mf_baseline_ab.py}"
-PLOT_SCRIPT="${PLOT_SCRIPT:-${REPO_ROOT}/code/nanophotonic_ab/plot_sweep_baseline_ab.py}"
+DATA_ROOT="${DATA_ROOT:-${REPO_ROOT}/data/mf_sweep_datasets_nano_ab}"
+
+# Refactored shared baseline backend
+TRAIN_SCRIPT="${TRAIN_SCRIPT:-${CODE_ROOT}/mf_train_baseline/mf_baseline.py}"
+SWEEP_SCRIPT="${SWEEP_SCRIPT:-${CODE_ROOT}/nanophotonic_ab/run_sweep_mf_baseline_ab.py}"
+PLOT_SCRIPT="${PLOT_SCRIPT:-${CODE_ROOT}/nanophotonic_ab/plot_sweep_baseline_ab.py}"
 
 mkdir -p "${RUNS_ROOT}"
 mkdir -p "${PLOT_OUT_DIR}"
+
+echo "[INFO] CODE_ROOT=${CODE_ROOT}"
+echo "[INFO] RUNS_ROOT=${RUNS_ROOT}"
 
 echo "[1/2] Running AB baseline sweep..."
 "${PYTHON_BIN}" "${SWEEP_SCRIPT}" \

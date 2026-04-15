@@ -37,6 +37,8 @@ This script does NOT require any optimizer; selection is purely pool-based ranki
 
 v6 additions
 ------------
+- Switched default comparison trainer from the old nanophotonic_tm-specific mf_baseline_tm.py
+  to the shared mf_train_baseline/mf_baseline.py, with path resolution relative to this script.
 - True per-method early-stop: once a method reaches the target-specific oracle_pool_best,
   that method is skipped in all later rounds.
 - Target-level early-stop: once all enabled *comparison* methods (hf_only / ar1 / ours_mean /
@@ -69,6 +71,17 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+DEFAULT_COMPARE_SCRIPT = "../mf_train_baseline/mf_baseline.py"
+
+
+def resolve_script_relative_path(path_str: str, script_dir: Path = SCRIPT_DIR) -> Path:
+    p = Path(str(path_str)).expanduser()
+    if not p.is_absolute():
+        p = script_dir / p
+    return p.resolve()
 
 
 # -----------------------------------------------------------------------------
@@ -760,8 +773,10 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=33)
     ap.add_argument("--out_dir", type=str, default="../../result_out/retro_acq_runs_tm")
 
-    # external comparison trainer that already compares hf_only / ar1 / ours
-    ap.add_argument("--compare_script", type=str, default="../nanophotonic_tm/mf_baseline_tm.py")
+    # shared comparison trainer that compares hf_only / ar1 / ours
+    # default path is resolved relative to this acquisition script, not the shell cwd
+    ap.add_argument("--compare_script", type=str, default=DEFAULT_COMPARE_SCRIPT,
+                    help="Path to shared baseline script (default: ../mf_train_baseline/mf_baseline.py, resolved relative to this script)")
     ap.add_argument("--python_bin", type=str, default=sys.executable)
     ap.add_argument("--extra_args", type=str, default="--wl_low 380 --wl_high 750 --fpca_var_ratio 0.999 --svgp_M 64 --svgp_steps 500 --gp_ard 1 --plot_ci 0 --n_plot 0")
     ap.add_argument("--timeout_sec", type=int, default=0)
@@ -772,7 +787,7 @@ def main() -> None:
     ap.add_argument("--pred_key_ar1", type=str, default="ar1")
     ap.add_argument("--pred_key_ours", type=str, default="ours")
     ap.add_argument("--uq_cache_name", type=str, default="uq_cache_v1",
-                    help="Cache stem used by mf_baseline_hf_delta_ar1_aligned_lfprob_tm.py under run_dir/**/cache/<name>.npz")
+                    help="Cache stem used by the shared mf_baseline.py under run_dir/**/cache/<name>.npz")
 
     # enable/disable policies
     ap.add_argument("--run_hf_only", type=int, default=1, choices=[0, 1])
@@ -797,7 +812,7 @@ def main() -> None:
     out_root = Path(args.out_dir).expanduser().resolve()
     out_root.mkdir(parents=True, exist_ok=True)
 
-    compare_script = Path(args.compare_script).expanduser().resolve()
+    compare_script = resolve_script_relative_path(args.compare_script)
     if not init_dir.exists():
         raise SystemExit(f"initial_subdir not found: {init_dir}")
     if not max_dir.exists():

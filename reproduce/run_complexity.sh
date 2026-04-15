@@ -5,13 +5,21 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+CODE_ROOT="${CODE_ROOT:-${REPO_ROOT}/code}"
+
+# For this figure-only script, RUNS_ROOT is used as the parent output root.
+RUNS_ROOT="${RUNS_ROOT:-${REPO_ROOT}/result_out}"
+
 ABSB_ROOT="${ABSB_ROOT:-${REPO_ROOT}/data/mf_sweep_datasets_nano_ab}"
 TMST_ROOT="${TMST_ROOT:-${REPO_ROOT}/data/mf_sweep_datasets_nano_tm}"
-OUT_PNG="${OUT_PNG:-${REPO_ROOT}/result_out/fig_structural_complexity_2panel.png}"
+OUT_PNG="${OUT_PNG:-${RUNS_ROOT}/fig_structural_complexity_2panel.png}"
 
-PLOT_SCRIPT="${PLOT_SCRIPT:-${REPO_ROOT}/code/complexity/plot_structural_complexity.py}"
+PLOT_SCRIPT="${PLOT_SCRIPT:-${CODE_ROOT}/complexity/plot_structural_complexity.py}"
 
 mkdir -p "$(dirname "${OUT_PNG}")"
+
+echo "[INFO] CODE_ROOT=${CODE_ROOT}"
+echo "[INFO] RUNS_ROOT=${RUNS_ROOT}"
 
 echo "[RUN] Plotting structural complexity figure..."
 "${PYTHON_BIN}" "${PLOT_SCRIPT}" \

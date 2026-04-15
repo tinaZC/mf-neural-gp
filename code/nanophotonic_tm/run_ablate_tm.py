@@ -2,11 +2,11 @@
 # -*- coding: utf-8 -*-
 """run_ablate_delta_student_tm.py
 
-Clean ablation runner for mf_train_fpca_sgp_delta_student_lfprob_tm.py
+Clean ablation runner for shared mf_train.py (TM).
 
 What it does
 ------------
-1) Runs a *selected set* of ablation variants (A0..A12) across one or more dataset roots and seeds.
+1) Runs a selected set of ablation variants (A0..A12) across one or more dataset roots and seeds.
 2) Collects scalar metrics from each run's report.json.
 3) Produces a summary folder with:
    (a) boxplot: RMSE over seeds for chosen ablations
@@ -22,12 +22,6 @@ Notes
 - Residual diagnostic curve is saved by training script as:
     <run_out>/rmse_curves/rmse_<split>__mf_student_residual.npy
   which equals RMS_k(y_hf - base_hat) for delta-student.
-
-IMPORTANT CHANGE (2026-02-25)
------------------------------
-Swap A1 and A12 definitions:
-- A1 is now "Stage-I MLP baseline" (former A12).
-- A12 is now "Oracle-LF / no-MLP" (former A1).
 """
 
 from __future__ import annotations
@@ -44,14 +38,19 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
+SCRIPT_DIR = Path(__file__).resolve().parent                 # .../code/nanophotonic_tm
+CODE_ROOT = SCRIPT_DIR.parent                                # .../code
+PROJECT_ROOT = CODE_ROOT.parent                              # repo root
+
+
 # -------------------------
 # Ablation definitions
 # -------------------------
 
 @dataclass(frozen=True)
 class Ablation:
-    key: str                 # short key like A0
-    tag: str                 # long tag used in folders
+    key: str
+    tag: str
     desc: str
     overrides: Dict[str, Any]
 
@@ -81,7 +80,7 @@ def get_ablations() -> Dict[str, Ablation]:
         "student_patience": 100,
     }
 
-    # Baseline Stage-I MLP config (former A12; now A1)
+    # Baseline Stage-I MLP config
     BASE_STAGE1_BASELINE: Dict[str, Any] = {
         **dict(BASE_BASE),
         "student_hidden": [256, 256],
@@ -100,12 +99,17 @@ def get_ablations() -> Dict[str, Ablation]:
             overrides=dict(BASE_BEST),
         ),
 
-        # A1 (SWAPPED): Stage-I MLP baseline (former A12)
+        # A1: student paired-only
         "A1": Ablation(
             key="A1",
-            tag="A1_stage1_mlp_baseline",
-            desc="A1 (swapped): Stage-I baseline MLP (hidden=[256,256], feat_dim=16, epochs=500, bs=64, patience=30); other settings same as A0 base (xlf+delta+ARD)",
-            overrides=dict(BASE_STAGE1_BASELINE),
+            tag="A1_student_paired",
+            desc="A1: Stage-I student paired-only (train/val/scaler=paired)",
+            overrides={
+                **BASE_BEST,
+                "student_train_set": "paired",
+                "student_val_set": "paired",
+                "student_y_scaler_fit": "paired",
+            },
         ),
 
         # A2: direct_no_delta (do not learn residual; directly learn HF)
@@ -148,17 +152,12 @@ def get_ablations() -> Dict[str, Ablation]:
             overrides={**BASE_BEST, "rho_fit_source": "student"},
         ),
 
-        # A7: student paired-only
+        # A7: Stage-I baseline MLP
         "A7": Ablation(
             key="A7",
-            tag="A7_student_paired",
-            desc="A7: Stage-I student paired-only (train/val/scaler=paired)",
-            overrides={
-                **BASE_BEST,
-                "student_train_set": "paired",
-                "student_val_set": "paired",
-                "student_y_scaler_fit": "paired",
-            },
+            tag="A7_stage1_mlp_baseline",
+            desc="A7: Stage-I baseline MLP (hidden=[256,256], feat_dim=16, epochs=500, bs=64, patience=30); other settings same as A0 base (xlf+delta+ARD)",
+            overrides=dict(BASE_STAGE1_BASELINE),
         ),
 
         # A8: Stage-II input = feature + x (no yl/lf as GP input)
@@ -193,11 +192,11 @@ def get_ablations() -> Dict[str, Ablation]:
             overrides={},
         ),
 
-        # A12 (SWAPPED): oracle LF / no-MLP (former A1)
+        # A12: oracle LF / no-MLP
         "A12": Ablation(
             key="A12",
             tag="A12_oracle_lf_no_mlp",
-            desc="A12 (swapped): skip Stage-I; LF_hat:=oracle (paired LF); delta residual; ARD=1 (oracle upper bound / diagnostic)",
+            desc="A12: skip Stage-I; LF_hat:=oracle (paired LF); delta residual; ARD=1 (oracle upper bound / diagnostic)",
             overrides={**BASE_BEST, "skip_student": 1, "mf_student_lf_source": "oracle"},
         ),
     }
@@ -414,28 +413,42 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument(
         "--train_script",
         type=str,
-        default=str(Path(__file__).with_name("mf_train_tm.py")),
-        help="Path to mf_train_fpca_sgp_delta_student_lfprob_tm.py",
+        default=str(CODE_ROOT / "mf_train_baseline" / "mf_train.py"),
+        help="Path to shared mf_train.py",
+    )
+    ap.add_argument(
+        "--run_prefix",
+        type=str,
+        default="tm0",
+        help="Run prefix passed to shared mf_train.py",
     )
     ap.add_argument(
         "--data_dirs",
         type=str,
         nargs="+",
-        default=["../../data/mf_sweep_datasets_nano_tm/hf100_lfx10"],
+        default=[str(PROJECT_ROOT / "data" / "mf_sweep_datasets_nano_tm" / "hf100_lfx10")],
         help="One or more dataset roots (each must match training script layout).",
     )
-    ap.add_argument("--out_dir", type=str, default="../../result_out/ablate_runs_tm",
-                    help="Root output directory for all runs.")
-    ap.add_argument("--exp_name", type=str, default="",
-                    help="Experiment name subfolder under out_dir.")
+    ap.add_argument(
+        "--out_dir",
+        type=str,
+        default=str(PROJECT_ROOT / "result_out" / "ablate_runs_tm"),
+        help="Root output directory for all runs.",
+    )
+    ap.add_argument(
+        "--exp_name",
+        type=str,
+        default="",
+        help="Experiment name subfolder under out_dir.",
+    )
 
-    # ap.add_argument("--seeds", type=int, nargs="+", default=[42])
-    ap.add_argument("--seeds", type=int, nargs="+",
-                    default=[42, 33, 55, 66, 77, 8, 9, 11, 22, 88, 99, 111, 222, 333, 555])
-    # After swap:
-    # A0_best_stage1_mlp_arch: 主方法（xlf + delta；Stage-I MLP=best）
-    # A1_stage1_mlp_baseline: Stage-I MLP=baseline（对照 A0 的 best MLP）  <-- swapped into A1
-    # A12_oracle_lf_no_mlp:   Oracle LF / skip Stage-I (upper bound)         <-- swapped into A12
+    ap.add_argument(
+        "--seeds",
+        type=int,
+        nargs="+",
+        default=[42, 33, 55, 66, 77, 8, 9, 11, 22, 88, 99, 111, 222, 333, 555],
+    )
+
     ap.add_argument(
         "--ablations",
         type=str,
@@ -444,8 +457,13 @@ def parse_args() -> argparse.Namespace:
         help="Ablations to run (any subset of: A0..A12).",
     )
 
-    ap.add_argument("--rmse_curve_split", type=str, default="test", choices=["val", "test"],
-                    help="Which split's RMSE_k curve to use in spectrum plots.")
+    ap.add_argument(
+        "--rmse_curve_split",
+        type=str,
+        default="test",
+        choices=["val", "test"],
+        help="Which split's RMSE_k curve to use in spectrum plots.",
+    )
 
     ap.add_argument("--dry_run", action="store_true")
     ap.add_argument("--skip_train", action="store_true", help="Skip training runs and only summarize existing folders.")
@@ -468,8 +486,13 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--ci_level", type=float, default=0.95)
     ap.add_argument("--ci_calibrate", type=int, default=1, choices=[0, 1])
 
-    ap.add_argument("--extra_args", type=str, nargs="*", default=[],
-                    help="Extra args passed directly to the training script.")
+    ap.add_argument(
+        "--extra_args",
+        type=str,
+        nargs="*",
+        default=[],
+        help="Extra args passed directly to the training script.",
+    )
 
     return ap.parse_args()
 
@@ -512,6 +535,7 @@ def main() -> None:
                         args.train_script,
                         "--data_dir", str(data_dir),
                         "--out_dir", str(run_dir),
+                        "--run_prefix", str(args.run_prefix),
                         "--seed", str(seed),
                         "--device", str(args.device),
                         "--wl_low", str(args.wl_low),
@@ -533,10 +557,18 @@ def main() -> None:
                     run_oracle = 0
                     run_student = 1
                     if ab.key == "A10":
-                        run_hf_only = 1; run_oracle = 0; run_student = 0
+                        run_hf_only = 1
+                        run_oracle = 0
+                        run_student = 0
                     elif ab.key == "A11":
-                        run_hf_only = 0; run_oracle = 1; run_student = 0
-                    cmd += ["--run_hf_only", str(run_hf_only), "--run_oracle", str(run_oracle), "--run_student", str(run_student)]
+                        run_hf_only = 0
+                        run_oracle = 1
+                        run_student = 0
+                    cmd += [
+                        "--run_hf_only", str(run_hf_only),
+                        "--run_oracle", str(run_oracle),
+                        "--run_student", str(run_student),
+                    ]
 
                     for kk, vv in ab.overrides.items():
                         flag = f"--{kk}"
@@ -662,7 +694,6 @@ def main() -> None:
                 label_map=label_map,
             )
 
-        # Residual diagnostic: after swap, oracle LF is A12 (not A1)
         if "A0" in chosen_keys and "A12" in chosen_keys:
             res_mean: Dict[str, np.ndarray] = {}
             res_std: Dict[str, np.ndarray] = {}

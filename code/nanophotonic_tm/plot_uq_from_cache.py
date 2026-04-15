@@ -254,7 +254,7 @@ def plot_fig1_reliability(out_png: Path, ci_grid: List[float], curves: Dict[str,
 
     ax.set_xlabel("Nominal coverage (CI level)")
     ax.set_ylabel("Empirical coverage (TEST)")
-    ax.set_title("Fig.1 Reliability curve (raw uncertainty)")
+    ax.set_title("Reliability curve (raw uncertainty)")
     ax.grid(True, alpha=0.25)
     ax.set_xlim(min(ci_grid), max(ci_grid))
 
@@ -314,7 +314,7 @@ def plot_fig2_cov_width_tradeoff(out_png: Path, points: Dict[str, Dict[str, Tupl
 
     ax.set_xlabel("Empirical coverage (TEST)")
     ax.set_ylabel("Mean interval width (TEST)")
-    ax.set_title(f"Fig.2 Coverage–Width trade-off at CI={ci_level:.2f}")
+    ax.set_title(f"Coverage–Width trade-off at CI={ci_level:.2f}")
     ax.grid(True, alpha=0.25)
     ax.set_xlim(x_lo, x_hi)
 
@@ -332,11 +332,10 @@ def main() -> None:
     ap.add_argument(
         "--best_cache_npz",
         type=str,
-        default="../../result_out/mf_sweep_runs_baseline_nano_tm/hf200_lfx10/seed333/bl0r333/cache/uq_cache_v1.npz",
-        # default="./mf_sweep_runs_baseline_nano_tm/hf200_lfx10/seed333/cache/uq_cache_v1.npz",
+        default="../../result_out/mf_sweep_runs_baseline_nano_tm/hf100_lfx10/seed355/bl0r355/cache/uq_cache_v1.npz",
         help="uq_cache_v1.npz for the BEST configuration (used by Fig1 & Fig2).",
     )
-    ap.add_argument("--out_dir", type=str, default="../../result_out/figs_uq/uq_hf200x10_seed333", help="Output directory for PNGs.")
+    ap.add_argument("--out_dir", type=str, default="../../result_out/figs_uq/uq_hf100x10_seed355", help="Output directory for PNGs.")
     ap.add_argument("--ci_level", type=float, default=0.95)
     ap.add_argument(
         "--ci_grid",

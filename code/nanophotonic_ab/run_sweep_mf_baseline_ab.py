@@ -1,29 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-run_sweep_mf_baseline_hf_delta_ar1.py  (v2)
+Sweep runner for nanophotonic AB baselines.
 
-Fix:
-- Do NOT pass --no_subdir unless the training script supports it.
-  (Your mf_baseline_hf_delta_ar1.py does not have this flag.)
-
-Design:
-- Thin wrapper: iterates dataset dirs, runs training script via subprocess, aggregates report.json.
-- One run directory per (dataset, seed): out_root/<dataset_name>/seed<seed>/
-  We pass --out_dir to that run_dir. If the training script still creates subfolders internally,
-  report.json is searched under run_dir recursively as fallback.
-
-Outputs:
-- out_root/sweep_results.csv
-- out_root/sweep_results.jsonl
+Direct call chain:
+  sweep -> mf_train_baseline/mf_baseline.py -> mf_train_baseline/mf_train.py
 """
 
 from __future__ import annotations
 
-import os
 import argparse
 import csv
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -31,6 +20,11 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+CODE_ROOT = SCRIPT_DIR.parent
+PROJECT_ROOT = CODE_ROOT.parent
 
 
 def _norm_path(p: str) -> str:
@@ -100,8 +94,6 @@ def write_csv(path: Path, rows: List[Dict[str, Any]]) -> None:
                 seen.add(k)
                 keys.append(k)
 
-    # NOTE: Keep these keys aligned with mf_baseline_hf_delta_ar1_aligned.py's report.json.
-    # Also include runner-level sweep settings (args.*) so the CSV is self-describing.
     preferred = [
         "dataset_name", "dataset_dir", "seed", "status", "runtime_sec", "run_dir",
         "args.wl_low", "args.wl_high", "args.fpca_var_ratio", "args.svgp_M", "args.svgp_steps", "args.gp_ard",
@@ -154,7 +146,6 @@ def find_report_json(run_dir: Path) -> Optional[Path]:
     cands = list(run_dir.rglob("report.json"))
     if not cands:
         return None
-    # Prefer the *shallowest* report.json under run_dir, then lexicographic.
     cands.sort(key=lambda p: (len(p.relative_to(run_dir).parts), str(p)))
     return cands[0]
 
@@ -167,6 +158,8 @@ def run_one(
     train_script: Path,
     python_bin: str,
     seed: int,
+    run_prefix: str,
+    ours_train_script: Path,
     sweep_args_flat: Dict[str, Any],
     extra_args: List[str],
     skip_if_done: bool,
@@ -190,9 +183,6 @@ def run_one(
     if skip_if_done and report_path is not None and report_path.exists():
         rep = load_json(report_path) or {}
         flat = flatten_dict(rep)
-        # NOTE: Do NOT auto-merge config.json.
-        # Some training scripts (including mf_baseline_hf_delta_ar1_aligned.py) don't emit it,
-        # and the user requested avoiding config.* / args.* inference when it's absent.
         row = {**base_row, "status": "SKIP_DONE", "runtime_sec": 0.0, "report_path": str(report_path)}
         row.update(flat)
         return RunResult(row=row, ok=True)
@@ -203,11 +193,12 @@ def run_one(
         "--data_dir", str(dataset_dir),
         "--out_dir", str(run_dir),
         "--seed", str(seed),
+        "--run_prefix", str(run_prefix),
+        "--ours_train_script", str(ours_train_script),
     ]
 
-    if use_no_subdir_if_available:
-        if script_supports_flag(python_bin, train_script, "--no_subdir"):
-            cmd += ["--no_subdir", "1"]
+    if use_no_subdir_if_available and script_supports_flag(python_bin, train_script, "--no_subdir"):
+        cmd += ["--no_subdir", "1"]
 
     cmd += extra_args
 
@@ -220,7 +211,7 @@ def run_one(
                 cmd,
                 stdout=logf,
                 stderr=subprocess.STDOUT,
-                cwd=str(run_dir),
+                cwd=str(CODE_ROOT),
                 timeout=timeout_sec,
                 check=False,
             )
@@ -241,7 +232,6 @@ def run_one(
             return RunResult(row=row, ok=False)
 
         flat = flatten_dict(rep)
-        # NOTE: Do NOT auto-merge config.json (see comment above).
         row = {**base_row, "status": "OK", "runtime_sec": float(dt), "report_path": str(report_path)}
         row.update(flat)
         return RunResult(row=row, ok=True)
@@ -260,13 +250,13 @@ def run_one(
 def main() -> None:
     ap = argparse.ArgumentParser()
 
-    ap.add_argument("--data_root", type=str, default="../../data/mf_sweep_datasets_nano_ab")
-    ap.add_argument("--out_root", type=str, default="../../result_out/mf_sweep_runs_baseline_nano_ab")
-    ap.add_argument("--train_script", type=str, default="mf_baseline_ab.py")
+    ap.add_argument("--data_root", type=str, default=str(PROJECT_ROOT / "data/mf_sweep_datasets_nano_ab"))
+    ap.add_argument("--out_root", type=str, default=str(PROJECT_ROOT / "result_out/mf_sweep_runs_baseline_nano_ab"))
+    ap.add_argument("--train_script", type=str, default=str(CODE_ROOT / "mf_train_baseline" / "mf_baseline.py"))
+    ap.add_argument("--ours_train_script", type=str, default=str(CODE_ROOT / "mf_train_baseline" / "mf_train.py"))
+    ap.add_argument("--run_prefix", type=str, default="ba0")
     ap.add_argument("--python_bin", type=str, default=sys.executable)
     ap.add_argument("--seeds", type=str, default="200,210,220,230,240,250,260,270,280,290,300,311,322,333,344,355,366,377,388,399")
-    # ap.add_argument("--seeds", type=str, default="322,333,344,355,366,377,388,399")
-    # ap.add_argument("--seeds", type=str, default="333")
     ap.add_argument("--wl_low", type=float, default=380.0)
     ap.add_argument("--wl_high", type=float, default=750.0)
     ap.add_argument("--fpca_var_ratio", type=float, default=0.999)
@@ -281,26 +271,27 @@ def main() -> None:
 
     args = ap.parse_args()
 
-    seeds: List[int] = []
-    for s in (args.seeds or "").split(","):
-        s = s.strip()
-        if s:
-            seeds.append(int(s))
+    seeds: List[int] = [int(s.strip()) for s in (args.seeds or "").split(",") if s.strip()]
     if not seeds:
         seeds = [42]
 
     data_root = Path(_norm_path(args.data_root)).expanduser().resolve()
     out_root = Path(_norm_path(args.out_root)).expanduser().resolve()
     train_script = Path(_norm_path(args.train_script)).expanduser().resolve()
+    ours_train_script = Path(_norm_path(args.ours_train_script)).expanduser().resolve()
 
     print(f"[INFO] data_root={data_root}")
     print(f"[INFO] out_root={out_root}")
     print(f"[INFO] train_script={train_script}")
+    print(f"[INFO] ours_train_script={ours_train_script}")
+    print(f"[INFO] run_prefix={args.run_prefix}")
 
     if not data_root.exists():
         raise SystemExit(f"data_root not found: {data_root}")
     if not train_script.exists():
         raise SystemExit(f"train_script not found: {train_script}")
+    if not ours_train_script.exists():
+        raise SystemExit(f"ours_train_script not found: {ours_train_script}")
 
     out_root.mkdir(parents=True, exist_ok=True)
 
@@ -309,7 +300,6 @@ def main() -> None:
         raise SystemExit(f"No dataset dirs found under: {data_root}")
 
     extra_args = shlex.split(args.extra_args.strip()) if args.extra_args.strip() else []
-
     _append_if_missing(extra_args, "--wl_low", str(float(args.wl_low)))
     _append_if_missing(extra_args, "--wl_high", str(float(args.wl_high)))
     _append_if_missing(extra_args, "--fpca_var_ratio", str(float(args.fpca_var_ratio)))
@@ -317,7 +307,6 @@ def main() -> None:
     _append_if_missing(extra_args, "--svgp_steps", str(int(args.svgp_steps)))
     _append_if_missing(extra_args, "--gp_ard", str(int(args.gp_ard)))
 
-    # Record sweep-level args in every row (even if the training report doesn't include them).
     sweep_args_flat: Dict[str, Any] = {
         "args.wl_low": float(args.wl_low),
         "args.wl_high": float(args.wl_high),
@@ -332,22 +321,17 @@ def main() -> None:
     try_no_subdir = bool(int(args.try_no_subdir))
 
     all_rows: List[Dict[str, Any]] = []
+    n_ok = 0
+    n_fail = 0
 
     print(f"[SWEEP] found {len(dataset_dirs)} datasets under {data_root}")
     print(f"[SWEEP] seeds={seeds}")
     if extra_args:
         print(f"[SWEEP] extra_args: {' '.join(extra_args)}")
 
-    n_ok = 0
-    n_fail = 0
-
-    # Loop order: seed outer, dataset inner.
-    # This guarantees that for any prefix of seeds completed, you have a full dataset sweep for each completed seed.
     for si, seed in enumerate(seeds, start=1):
         print(f"\n[SWEEP][SEED] seed={seed} ({si}/{len(seeds)})")
         for d in dataset_dirs:
-            # Make dataset_name stable and collision-free under a sweep root.
-            # Example: hf50_lfx30/ds_001  ->  hf50_lfx30__ds_001
             rel = d.relative_to(data_root)
             dataset_name = "__".join(rel.parts)
             print(f"\n[RUN] seed={seed} dataset={dataset_name}")
@@ -358,6 +342,8 @@ def main() -> None:
                 train_script=train_script,
                 python_bin=str(args.python_bin),
                 seed=int(seed),
+                run_prefix=str(args.run_prefix),
+                ours_train_script=ours_train_script,
                 sweep_args_flat=sweep_args_flat,
                 extra_args=extra_args,
                 skip_if_done=skip_if_done,
@@ -373,7 +359,6 @@ def main() -> None:
                 print(f"[FAIL] -> {rr.row.get('run_dir')} status={rr.row.get('status')}")
                 print(f"       see log: {Path(rr.row.get('run_dir')) / 'run.log'}")
 
-        # Save partial results after each seed so interrupted runs still produce complete-per-seed stats.
         csv_path = out_root / "sweep_results.csv"
         jsonl_path = out_root / "sweep_results.jsonl"
         write_csv(csv_path, all_rows)
