@@ -29,14 +29,23 @@ mkdir -p "${PLOT_OUT_DIR}"
 echo "[INFO] CODE_ROOT=${CODE_ROOT}"
 echo "[INFO] OUT_ROOT=${OUT_ROOT}"
 
-echo "[1/2] Running MTM baseline sweep..."
-"${PYTHON_BIN}" "${RUN_SCRIPT}" \
-  --python_exe "${PYTHON_BIN}" \
-  --baseline_script "${BASELINE_SCRIPT}" \
-  --plot_script "${PLOT_SCRIPT}" \
-  --data_dir "${DATA_DIR}" \
-  --out_root "${OUT_ROOT}" \
-  --call_plot 0
+DATASET_RUN_ROOT="${OUT_ROOT}/hf50_lfx10"
+FIRST_REPORT="$(find "${DATASET_RUN_ROOT}" -name report.json -type f -print -quit 2>/dev/null || true)"
+
+if [[ -n "${FIRST_REPORT}" ]]; then
+  echo "[1/2] Found existing MTM run results:"
+  echo "      ${FIRST_REPORT}"
+  echo "      Skip rerunning baseline sweep; plot only."
+else
+  echo "[1/2] Running MTM baseline sweep..."
+  "${PYTHON_BIN}" "${RUN_SCRIPT}" \
+    --python_exe "${PYTHON_BIN}" \
+    --baseline_script "${BASELINE_SCRIPT}" \
+    --plot_script "${PLOT_SCRIPT}" \
+    --data_dir "${DATA_DIR}" \
+    --out_root "${OUT_ROOT}" \
+    --call_plot 0
+fi
 
 echo "[2/2] Plotting MTM baseline results..."
 "${PYTHON_BIN}" "${PLOT_SCRIPT}" \

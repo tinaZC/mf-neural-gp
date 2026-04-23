@@ -253,16 +253,28 @@ def aggregate_seed_means(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         "coverage_test_cal",
         "ci_width_test_cal",
     ]
+
+    def get_group_dim(r: Dict[str, Any]) -> int:
+        eff = safe_float(r.get("fpca_dim_effective"))
+        if not math.isnan(eff):
+            return int(round(eff))
+        return int(r["dim"])
+
     groups = defaultdict(list)
     for r in rows:
         status = str(r.get("status", ""))
         if status == "ok" or status.startswith("skipped_existing"):
-            groups[int(r["dim"])].append(r)
+            groups[get_group_dim(r)].append(r)
 
     out: List[Dict[str, Any]] = []
-    for dim in sorted(groups.keys()):
-        grp = groups[dim]
-        rec: Dict[str, Any] = {"dim": dim, "n_seeds": len(grp)}
+    for eff_dim in sorted(groups.keys()):
+        grp = groups[eff_dim]
+        requested_dims = sorted({int(x["dim"]) for x in grp})
+        rec: Dict[str, Any] = {
+            "fpca_dim_effective": eff_dim,
+            "requested_dims": ",".join(str(x) for x in requested_dims),
+            "n_seeds": len(grp),
+        }
         for c in num_cols:
             vals = [safe_float(x.get(c)) for x in grp]
             vals = [v for v in vals if not math.isnan(v)]
@@ -429,7 +441,7 @@ def main() -> None:
 
     if len(seeds) > 1:
         agg_rows = aggregate_seed_means(all_rows)
-        agg_fields = ["dim", "n_seeds"]
+        agg_fields = ["fpca_dim_effective", "requested_dims", "n_seeds"]
         for base in [
             "fpca_dim_effective",
             "evr_sum",

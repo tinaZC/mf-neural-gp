@@ -18,12 +18,37 @@ EXP_NAME="${EXP_NAME:-nano_tm_main}"
 TRAIN_SCRIPT="${TRAIN_SCRIPT:-${CODE_ROOT}/mf_train_baseline/mf_train.py}"
 ABLATE_SCRIPT="${ABLATE_SCRIPT:-${CODE_ROOT}/nanophotonic_tm/run_ablate_tm.py}"
 
+EXP_DIR="${OUT_DIR}/${EXP_NAME}"
+
 echo "[INFO] CODE_ROOT=${CODE_ROOT}"
 echo "[INFO] OUT_DIR=${OUT_DIR}"
+echo "[INFO] EXP_DIR=${EXP_DIR}"
+
+SKIP_TRAIN_FLAG=""
+FIRST_REPORT="$(find "${EXP_DIR}" -name report.json -type f -print -quit 2>/dev/null || true)"
+
+if [[ -n "${FIRST_REPORT}" ]]; then
+  echo "[INFO] Found existing ablation run results under:"
+  echo "       ${EXP_DIR}"
+  echo "[INFO] Example report:"
+  echo "       ${FIRST_REPORT}"
+  echo "[INFO] Skip training and summarize/plot only."
+  SKIP_TRAIN_FLAG="--skip_train"
+else
+  echo "[INFO] No existing report.json found under:"
+  echo "       ${EXP_DIR}"
+  echo "[INFO] Run training + summarize + plot."
+fi
 
 "${PYTHON_BIN}" "${ABLATE_SCRIPT}" \
   --python "${PYTHON_BIN}" \
   --train_script "${TRAIN_SCRIPT}" \
   --data_dirs "${DATA_DIR}" \
   --out_dir "${OUT_DIR}" \
-  --exp_name "${EXP_NAME}"
+  --exp_name "${EXP_NAME}" \
+  ${SKIP_TRAIN_FLAG}
+
+echo "[DONE] Ablation workflow finished."
+echo "       exp_dir = ${EXP_DIR}"
+echo "       summary = ${EXP_DIR}/summary_runs.json"
+echo "       plots   = ${EXP_DIR}/summary"

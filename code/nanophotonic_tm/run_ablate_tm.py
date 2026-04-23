@@ -362,7 +362,7 @@ def plot_ablation_boxplot(
         q3 = float(np.quantile(v_arr, 0.75))
         y_off = 0.03 * y_rng
         ax.text(i, q3 + y_off, f"{mu:.2e}±{sd:.2e}",
-                ha="center", va="bottom", fontsize=8)
+                ha="center", va="bottom", fontsize=11)
 
     ax.set_ylabel(ylabel)
     ax.ticklabel_format(axis="y", style="sci", scilimits=(0, 0))
@@ -396,7 +396,7 @@ def plot_spectrum_curves(
     plt.ylabel(ylabel)
     plt.title(title)
     plt.grid(True, alpha=0.3)
-    plt.legend(fontsize=8)
+    plt.legend(fontsize=11)
     plt.tight_layout()
     plt.savefig(out_png, dpi=160)
     plt.close()
@@ -642,7 +642,8 @@ def main() -> None:
                 out_png=plot_dir / f"{ds}__boxplot__y_rmse_test.png",
                 tags=tags,
                 values=vals_list,
-                title="RMSE of ablation experiments",
+                # title="RMSE of ablation experiments",
+                title="",
                 ylabel="RMSE",
             )
 
@@ -688,7 +689,8 @@ def main() -> None:
                 axis=axis_ref,
                 curves_mean=curves_mean,
                 curves_std=curves_std,
-                title="Spectrum RMSE curves",
+                # title="Spectrum RMSE curves",
+                title="",
                 xlabel="wavelength",
                 ylabel="RMSE",
                 label_map=label_map,

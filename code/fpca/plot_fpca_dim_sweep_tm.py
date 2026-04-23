@@ -102,35 +102,37 @@ def _get_series(df: pd.DataFrame, name: str) -> Optional[pd.Series]:
 
 def load_curves(df: pd.DataFrame) -> Tuple[pd.Series, Dict[str, Dict[str, Optional[pd.Series]]], str]:
     mode = infer_mode(df)
-    df = df.copy().sort_values("dim").reset_index(drop=True)
-    x = df["dim"]
+    df = df.copy()
+    x_col = "fpca_dim_effective" if "fpca_dim_effective" in df.columns else "dim"
+    df = df.sort_values(x_col).reset_index(drop=True)
+    x = df[x_col]
 
     if mode == "single_seed":
         curves = {
             "recon": {
                 "y": _get_series(df, "recon_rmse_hfval"),
                 "std": None,
-                "ylabel": "Recon RMSE (HF val)",
+                "ylabel": "HF validation reconstruction RMSE",
             },
             "y_rmse": {
                 "y": _get_series(df, "y_rmse_test"),
                 "std": None,
-                "ylabel": "y_RMSE (test)",
+                "ylabel": "Test RMSE",
             },
             "nll": {
                 "y": _get_series(df, "nll_test_cal"),
                 "std": None,
-                "ylabel": "Calibrated NLL (test)",
+                "ylabel": "Adjusted test NLL",
             },
             "coverage": {
                 "y": _get_series(df, "coverage_test_cal"),
                 "std": None,
-                "ylabel": "Coverage (test, calibrated)",
+                "ylabel": "Calibrated coverage",
             },
             "width": {
                 "y": _get_series(df, "ci_width_test_cal"),
                 "std": None,
-                "ylabel": "CI width (test, calibrated)",
+                "ylabel": "Mean interval width (response units)",
             },
         }
     else:
@@ -138,27 +140,27 @@ def load_curves(df: pd.DataFrame) -> Tuple[pd.Series, Dict[str, Dict[str, Option
             "recon": {
                 "y": _get_series(df, "recon_rmse_hfval_mean"),
                 "std": _get_series(df, "recon_rmse_hfval_std"),
-                "ylabel": "Recon RMSE (HF val)",
+                "ylabel": "HF validation reconstruction RMSE",
             },
             "y_rmse": {
                 "y": _get_series(df, "y_rmse_test_mean"),
                 "std": _get_series(df, "y_rmse_test_std"),
-                "ylabel": "y_RMSE (test)",
+                "ylabel": "Test RMSE",
             },
             "nll": {
                 "y": _get_series(df, "nll_test_cal_mean"),
                 "std": _get_series(df, "nll_test_cal_std"),
-                "ylabel": "Calibrated NLL (test)",
+                "ylabel": "Adjusted test NLL",
             },
             "coverage": {
                 "y": _get_series(df, "coverage_test_cal_mean"),
                 "std": _get_series(df, "coverage_test_cal_std"),
-                "ylabel": "Coverage (test, calibrated)",
+                "ylabel": "Calibrated coverage",
             },
             "width": {
                 "y": _get_series(df, "ci_width_test_cal_mean"),
                 "std": _get_series(df, "ci_width_test_cal_std"),
-                "ylabel": "CI width (test, calibrated)",
+                "ylabel": "Mean interval width (response units)",
             },
         }
 
@@ -171,18 +173,20 @@ def load_curves(df: pd.DataFrame) -> Tuple[pd.Series, Dict[str, Dict[str, Option
 def setup_style() -> None:
     mpl.rcParams.update({
         "font.family": "DejaVu Sans",
-        "font.size": 11,
+        # overall text
+        "font.size": 12,
         "axes.labelsize": 12,
         "axes.titlesize": 12,
-        "xtick.labelsize": 10.5,
-        "ytick.labelsize": 10.5,
-        "legend.fontsize": 10,
-        "figure.titlesize": 13,
-        "axes.linewidth": 1.0,
-        "xtick.major.width": 1.0,
-        "ytick.major.width": 1.0,
-        "xtick.major.size": 4.0,
-        "ytick.major.size": 4.0,
+        "xtick.labelsize": 11,
+        "ytick.labelsize": 11,
+        "legend.fontsize": 11,
+        "figure.titlesize": 12,
+
+        "axes.linewidth": 0.8,
+        "xtick.major.width": 0.8,
+        "ytick.major.width": 0.8,
+        "xtick.major.size": 3.5,
+        "ytick.major.size": 3.5,
         "pdf.fonttype": 42,
         "ps.fonttype": 42,
     })
@@ -221,19 +225,23 @@ def _pad_ylim(y: pd.Series, frac: float = 0.10) -> Tuple[float, float]:
     return ymin - pad, ymax + pad
 
 
-def style_axis(ax, xlabel: str, ylabel: str, panel_label: str, title: str) -> None:
+def style_axis(ax, xlabel: str, ylabel: str, title: str = "") -> None:
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
-    ax.set_title(title, pad=8)
+    if str(title).strip():
+        ax.set_title(title, pad=4)
     ax.grid(True, which="major", alpha=0.28, linewidth=0.8)
     ax.set_axisbelow(True)
     for spine in ax.spines.values():
         spine.set_alpha(0.9)
-    ax.text(
-        0.02, 0.98, panel_label,
-        transform=ax.transAxes,
-        ha="left", va="top",
-        fontsize=12, fontweight="bold"
+
+
+def add_panel_label_outside(fig, ax, panel_label: str) -> None:
+    pos = ax.get_position()
+    fig.text(
+        pos.x0, pos.y1 + 0.012, panel_label,
+        ha="left", va="bottom",
+        fontsize=11, fontweight="normal"
     )
 
 
@@ -308,7 +316,7 @@ def annotate_best(
         xy=(xv, yv),
         xytext=(8, 10),
         textcoords="offset points",
-        fontsize=9.5,
+        fontsize=11,
         ha="left",
         va="bottom",
         bbox=dict(boxstyle="round,pad=0.25", fc="white", ec=color, alpha=0.92),
@@ -349,10 +357,9 @@ def make_2x2_figure(
     )
     style_axis(
         ax_a,
-        xlabel="FPCA latent dimension",
+        xlabel=r"Latent dimension $R$",
         ylabel=curves["recon"]["ylabel"],
-        panel_label="(a)",
-        title="Reconstruction fidelity",
+        title="",
     )
     ax_a.set_xticks(list(map(int, x.tolist())))
     ax_a.set_ylim(*_pad_ylim(curves["recon"]["y"], frac=0.12))
@@ -370,10 +377,9 @@ def make_2x2_figure(
     )
     style_axis(
         ax_b,
-        xlabel="FPCA latent dimension",
+        xlabel=r"Latent dimension $R$",
         ylabel=curves["y_rmse"]["ylabel"],
-        panel_label="(b)",
-        title="Downstream spectral error",
+        title="",
     )
     ax_b.set_xticks(list(map(int, x.tolist())))
     ax_b.set_ylim(*_pad_ylim(curves["y_rmse"]["y"], frac=0.15))
@@ -382,7 +388,7 @@ def make_2x2_figure(
     plot_line_with_band(
         ax_c, x,
         curves["nll"]["y"], curves["nll"]["std"],
-        color=c_nll, label="Calibrated NLL"
+        color=c_nll, label="Adjusted NLL"
     )
     annotate_best(
         ax_c, x,
@@ -391,10 +397,9 @@ def make_2x2_figure(
     )
     style_axis(
         ax_c,
-        xlabel="FPCA latent dimension",
+        xlabel=r"Latent dimension $R$",
         ylabel=curves["nll"]["ylabel"],
-        panel_label="(c)",
-        title="Calibrated uncertainty quality",
+        title="",
     )
     ax_c.set_xticks(list(map(int, x.tolist())))
     ax_c.set_ylim(*_pad_ylim(curves["nll"]["y"], frac=0.15))
@@ -415,10 +420,9 @@ def make_2x2_figure(
         )
         style_axis(
             ax_d,
-            xlabel="FPCA latent dimension",
-            ylabel="Coverage / CI width",
-            panel_label="(d)",
-            title="Uncertainty decomposition",
+            xlabel=r"Latent dimension $R$",
+            ylabel="Coverage / interval width",
+            title="",
         )
         ax_d.set_xticks(list(map(int, x.tolist())))
     else:
@@ -473,10 +477,9 @@ def make_2x2_figure(
 
         style_axis(
             ax_d,
-            xlabel="FPCA latent dimension",
+            xlabel=r"Latent dimension $R$",
             ylabel=curves["coverage"]["ylabel"] if has_cov else "Coverage",
-            panel_label="(d)",
-            title="Coverage and interval width",
+            title="",
         )
         ax_d.set_xticks(list(map(int, x.tolist())))
         ax_d.legend(handles, labels, loc="best", frameon=True)
@@ -485,6 +488,12 @@ def make_2x2_figure(
         fig.suptitle(figure_title, y=0.985)
 
     plt.tight_layout(rect=(0, 0, 1, 0.97 if figure_title.strip() else 1))
+
+    add_panel_label_outside(fig, ax_a, "(a)")
+    add_panel_label_outside(fig, ax_b, "(b)")
+    add_panel_label_outside(fig, ax_c, "(c)")
+    add_panel_label_outside(fig, ax_d, "(d)")
+
     fig.savefig(out_png, dpi=300, bbox_inches="tight")
     fig.savefig(out_pdf, bbox_inches="tight")
     plt.close(fig)

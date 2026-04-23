@@ -2175,8 +2175,18 @@ def main(argv: Optional[Sequence[str]] = None, defaults: Optional[TrainDefaults]
                     y_hf_gt=y_hf_gt[ii],
                     y_lf=y_lf[ii],
                     y_mf=y_pred_st[ii],
-                    title=title_base + " | CI raw",
+                    # title=title_base + " | CI raw",
+                    title="",
                     mf_band=mf_band_raw,
+                    x_label=r"Wavelength $\lambda$ (nm)",
+                    y_label="Transmission",
+                    curve_labels={
+                        "hf": "HF target",
+                        "lf": "LF",
+                        "mf": "Neural-GP MF",
+                    },
+                    band_label=f"{int(round(ci_lvl * 100))}% predictive interval",
+                    font_size=8,
                 )
 
                 mf_band_cal = make_ci_bands_for_curve(y_pred_st[ii], std_st_cal[ii], ci_lvl)
@@ -2187,8 +2197,8 @@ def main(argv: Optional[Sequence[str]] = None, defaults: Optional[TrainDefaults]
                     y_hf_gt=y_hf_gt[ii],
                     y_lf=y_lf[ii],
                     y_mf=y_pred_st[ii],
-                    # title=title_base + " | CI calibrated",
-                    title="MF-inferred response spectrum",
+                    title=title_base + " | CI calibrated",
+                    # title="MF-inferred response spectrum",
                     mf_band=mf_band_cal,
                 )
                 # plot_case_5curves_spectrum(

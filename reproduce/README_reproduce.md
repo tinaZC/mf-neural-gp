@@ -8,21 +8,48 @@ All scripts resolve `REPO_ROOT` automatically, so they can be launched from any 
 
 Run the scripts in the following order:
 
-1. `run_baseline_sweep_tm.sh` — Fig. 2–3
-2. `run_baseline_sweep_ab.sh` — Fig. 4
-3. `run_efficiency_tm.sh` — Fig. 5 and Table 1
-4. `run_hf_acquisition_tm.sh` — Fig. 6
-5. `run_uq_tm.sh` — Fig. 7
-6. `run_complexity.sh` — Fig. 8
-7. `run_fpca_dim_sweep_tm.sh` — Fig. 9
-8. `run_baseline_sweep_mtm.sh` — Fig. 10
-9. `run_ablation_tm.sh` — Fig. 11
+1. `run_plot_examples_tm.sh` — Fig. 2
+2. `run_baseline_sweep_tm.sh` — Fig. 3
+3. `run_baseline_sweep_ab.sh` — Fig. 4
+4. `run_efficiency_tm.sh` — Fig. 5 and Table 1
+5. `run_hf_acquisition_tm.sh` — Fig. 6
+6. `run_uq_tm.sh` — Fig. 7
+7. `run_complexity.sh` — Fig. 8
+8. `run_fpca_dim_sweep_tm.sh` — Fig. 9
+9. `run_plot_examples_mtm.sh` — Fig. 10(a,b)
+10. `run_baseline_sweep_mtm.sh` — Fig. 10 (c,d)
+11. `run_ablation_tm.sh` — Fig. 11
 
 ## Scripts
 
-### 1. Transmission baseline sweep (`run_baseline_sweep_tm.sh`)
+### 1. Transmission example plots (`run_plot_examples_tm.sh`)
 
-**Covers:** Fig. 2–3
+**Covers:** Fig. 2
+
+```bash
+bash reproduce/run_plot_examples_tm.sh
+```
+
+This script trains the transmission Neural–GP MF model on the default datasets and copies the selected representative test-case plots into a figure-ready output directory.
+
+Default configuration:
+- datasets: `hf50_lfx10` and `hf100_lfx10`
+- selection mode: `specified`
+- default example indices: `hf50_lfx10:1` and `hf100_lfx10:11`
+
+The script also writes a manifest and per-example JSON summaries so the copied figure panels can be traced back to the original test-case plots and RMSE statistics.
+
+Main outputs:
+- `result_out/tm_examples_runs/fig_tm_examples/`
+- `result_out/tm_examples_runs/fig_tm_examples/tm_example_manifest.jsonl`
+
+You can switch to automatic case selection by setting `SELECT_MODE=best`, or override the default dataset-to-index mapping via `EXAMPLE_IDXS`.
+
+---
+
+### 2. Transmission baseline sweep (`run_baseline_sweep_tm.sh`)
+
+**Covers:** Fig. 3
 
 ```bash
 bash reproduce/run_baseline_sweep_tm.sh
@@ -36,7 +63,7 @@ Main outputs:
 
 ---
 
-### 2. Absorption baseline sweep (`run_baseline_sweep_ab.sh`)
+### 3. Absorption baseline sweep (`run_baseline_sweep_ab.sh`)
 
 **Covers:** Fig. 4
 
@@ -52,7 +79,7 @@ Main outputs:
 
 ---
 
-### 3. Efficiency analysis (`run_efficiency_tm.sh`)
+### 4. Efficiency analysis (`run_efficiency_tm.sh`)
 
 **Covers:** Fig. 5 and Table 1
 
@@ -76,7 +103,7 @@ Main outputs:
 
 ---
 
-### 4. Retrospective HF acquisition (`run_hf_acquisition_tm.sh`)
+### 5. Retrospective HF acquisition (`run_hf_acquisition_tm.sh`)
 
 **Covers:** Fig. 6
 
@@ -112,7 +139,7 @@ If needed, the dataset root, output directory, and script paths can still be ove
 
 ---
 
-### 5. UQ figure (`run_uq_tm.sh`)
+### 6. UQ figure (`run_uq_tm.sh`)
 
 **Covers:** Fig. 7
 
@@ -133,7 +160,7 @@ Main outputs:
 
 ---
 
-### 6. Structural complexity (`run_complexity.sh`)
+### 7. Structural complexity (`run_complexity.sh`)
 
 **Covers:** Fig. 8
 
@@ -143,12 +170,13 @@ bash reproduce/run_complexity.sh
 
 This script computes and plots the structural complexity figure by scanning the nanophotonic absorption and transmission dataset roots.
 
-Main output:
+Main outputs:
+- `result_out/structural_complexity/`
 - `result_out/fig_structural_complexity_2panel.png`
 
 ---
 
-### 7. FPCA latent-dimension sweep (`run_fpca_dim_sweep_tm.sh`)
+### 8. FPCA latent-dimension sweep (`run_fpca_dim_sweep_tm.sh`)
 
 **Covers:** Fig. 9
 
@@ -165,9 +193,35 @@ Main outputs:
 
 ---
 
-### 8. Microwave MTM baseline sweep (`run_baseline_sweep_mtm.sh`)
+### 9. MTM example plots (`run_plot_examples_mtm.sh`)
 
-**Covers:** Fig. 10
+**Covers:** Fig. 10(a,b)
+
+```bash
+bash reproduce/run_plot_examples_mtm.sh
+```
+
+This script trains the MTM Neural–GP MF student branch on the default MTM subset and copies the selected representative test-case plots into a figure-ready output directory.
+
+Default configuration:
+- dataset: `hf50_lfx10`
+- selection mode: `specified`
+- default example indices: `0 7`
+- only the MF-student branch is run; HF-only and MF-oracle are skipped
+
+The script also writes a manifest and per-example JSON summaries for traceability.
+
+Main outputs:
+- `result_out/mtm_examples_runs/hf50_lfx10/fig_mtm_examples/`
+- `result_out/mtm_examples_runs/hf50_lfx10/fig_mtm_examples/mtm_example_manifest.jsonl`
+
+You can switch to automatic case selection with `SELECT_MODE=best`, or override the default index list via `SPECIFIED_IDXS`.
+
+---
+
+### 10. Microwave MTM baseline sweep (`run_baseline_sweep_mtm.sh`)
+
+**Covers:** Fig. 10 (aggregate MTM comparison)
 
 ```bash
 bash reproduce/run_baseline_sweep_mtm.sh
@@ -183,7 +237,7 @@ If you change `DATA_DIR` to another MTM subset, you should also update the plott
 
 ---
 
-### 9. Ablation study (`run_ablation_tm.sh`)
+### 11. Ablation study (`run_ablation_tm.sh`)
 
 **Covers:** Fig. 11
 

@@ -283,9 +283,10 @@ def preprocess_df(csv_path: Path, skip_times: int) -> pd.DataFrame:
     df["lfx"] = lfx_list
 
     if "status" in df.columns:
-        df_ok = df[df["status"].astype(str).str.upper().eq("OK")].copy()
+        status_norm = df["status"].astype(str).str.upper().str.strip()
+        df_ok = df[status_norm.isin(["OK", "SKIP_DONE"])].copy()
         if len(df_ok) == 0:
-            raise ValueError("No rows with status == OK.")
+            raise ValueError("No rows with status in {OK, SKIP_DONE}.")
         df = df_ok
 
     if int(skip_times) == 0:

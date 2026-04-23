@@ -20,26 +20,33 @@ PLOT_SCRIPT="${PLOT_SCRIPT:-${CODE_ROOT}/hf_acquisition/plot_retro_acq_curve.py}
 COMPARE_SCRIPT="${COMPARE_SCRIPT:-${CODE_ROOT}/mf_train_baseline/mf_baseline.py}"
 
 PLOT_OUT_PATH="${PLOT_OUT_PATH:-${OUT_DIR}/_fig_acquisition.png}"
+SUMMARY_CSV="${OUT_DIR}/retro_acq_summary.csv"
 
 mkdir -p "${OUT_DIR}"
 
 echo "[INFO] CODE_ROOT=${CODE_ROOT}"
 echo "[INFO] OUT_DIR=${OUT_DIR}"
 
-echo "[1/2] Running retrospective HF acquisition..."
-"${PYTHON_BIN}" "${RETRO_SCRIPT}" \
-  --root "${DATA_ROOT}" \
-  --initial_subdir hf50_lfx10 \
-  --max_subdir hf500_lfx10 \
-  --target_split test \
-  --n_targets 20 \
-  --rounds 10 \
-  --batch_size 5 \
-  --beta 0.5 \
-  --out_dir "${OUT_DIR}" \
-  --compare_script "${COMPARE_SCRIPT}" \
-  --python_bin "${PYTHON_BIN}" \
-  --extra_args "--wl_low 380 --wl_high 750 --fpca_var_ratio 0.999 --svgp_M 64 --svgp_steps 500 --gp_ard 1 --plot_ci 0 --n_plot 0"
+if [[ -f "${SUMMARY_CSV}" ]]; then
+  echo "[1/2] Found existing acquisition summary:"
+  echo "      ${SUMMARY_CSV}"
+  echo "      Skip rerunning acquisition; plot only."
+else
+  echo "[1/2] Running retrospective HF acquisition..."
+  "${PYTHON_BIN}" "${RETRO_SCRIPT}" \
+    --root "${DATA_ROOT}" \
+    --initial_subdir hf50_lfx10 \
+    --max_subdir hf500_lfx10 \
+    --target_split test \
+    --n_targets 20 \
+    --rounds 10 \
+    --batch_size 5 \
+    --beta 0.5 \
+    --out_dir "${OUT_DIR}" \
+    --compare_script "${COMPARE_SCRIPT}" \
+    --python_bin "${PYTHON_BIN}" \
+    --extra_args "--wl_low 380 --wl_high 750 --fpca_var_ratio 0.999 --svgp_M 64 --svgp_steps 500 --gp_ard 1 --plot_ci 0 --n_plot 0"
+fi
 
 echo "[2/2] Plotting aggregate acquisition curve..."
 "${PYTHON_BIN}" "${PLOT_SCRIPT}" \
@@ -48,4 +55,5 @@ echo "[2/2] Plotting aggregate acquisition curve..."
 
 echo "[DONE] HF acquisition reproduction finished."
 echo "       retro_dir = ${OUT_DIR}"
+echo "       summary   = ${SUMMARY_CSV}"
 echo "       figure    = ${PLOT_OUT_PATH}"

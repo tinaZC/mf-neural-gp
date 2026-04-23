@@ -1108,8 +1108,8 @@ def main():
                     help="FPCA fixed dim. If 0, use adaptive dim by fpca_var_ratio (default).")
     ap.add_argument("--fpca_var_ratio", type=float, default=0.999,
                     help="FPCA adaptive dim: choose smallest R s.t. cumulative EVR >= fpca_var_ratio.")
-    ap.add_argument("--fpca_max_dim", type=int, default=50,
-                    help="FPCA adaptive dim upper bound.")
+    ap.add_argument("--fpca_max_dim", type=int, default=64,
+                    help="FPCA latent-dimension upper bound before applying the HF-train rank cap.")
     ap.add_argument("--fpca_ridge", type=float, default=1e-8,
                     help="FPCA covariance ridge for numerical stability.")
 
@@ -1461,12 +1461,32 @@ def main():
     print(f"[INFO] LF unpaired split train/val/test = {x_lfu_tr.shape[0]}/{x_lfu_va.shape[0]}/{x_lfu_te.shape[0]}")
     print(f"[INFO] CI: level={float(args.ci_level)}  z≈{z_from_ci_level(float(args.ci_level)):.4f}  calibrate={bool(args.ci_calibrate)}")
 
+    # --- FPCA effective dimension cap: requested dim is clipped by HF-train rank cap (n_hf_train - 1)
+    fpca_dim_requested = int(getattr(args, "fpca_dim", 0))
+    hf_rank_cap = max(1, int(x_hf_tr.shape[0]) - 1)
+
+    if str(args.dim_reduce).lower().strip() == "fpca":
+        user_fpca_cap = int(getattr(args, "fpca_max_dim", 0))
+        if user_fpca_cap > 0:
+            args.fpca_max_dim = min(user_fpca_cap, hf_rank_cap)
+        else:
+            args.fpca_max_dim = hf_rank_cap
+
+        print(
+            f"[FPCA-CAP] requested_dim={fpca_dim_requested} | "
+            f"hf_train_n={int(x_hf_tr.shape[0])} | "
+            f"rank_cap={hf_rank_cap} | "
+            f"effective_fpca_max_dim={int(args.fpca_max_dim)}"
+        )
+
     # config.json
     config = {
         "run_id": run_id, "run_name": run_name,
         "args": vars(args),
         "data_dir": str(data_dir), "out_dir": str(out_dir),
         "K": K, "xdim": xdim,
+        "fpca_dim_requested": int(fpca_dim_requested),
+        "hf_rank_cap": int(hf_rank_cap),
         "best_reducer_config": best_cfg_info,
         "best_reducer_task_name": best_cfg_task_name if use_best_cfg else "",
     }
@@ -3013,6 +3033,8 @@ def main():
 
             "fpca_diag": (
                 {
+                    "fpca_dim_requested": int(fpca_dim_requested),
+                    "hf_rank_cap": int(hf_rank_cap),
                     "fpca_dim_effective": int(fpca_dim_effective) if fpca_dim_effective is not None else None,
                     "fpca_evr_sum": float(fpca_evr_sum) if fpca_evr_sum is not None else None,
                     "fpca_recon_rmse_hftr": float(fpca_recon_rmse_hftr) if fpca_recon_rmse_hftr is not None else None,
@@ -3197,6 +3219,8 @@ def main():
 
     if dim_reduce == "fpca":
         res_row.update({
+            "fpca_dim_requested": int(fpca_dim_requested),
+            "hf_rank_cap": int(hf_rank_cap),
             "fpca_dim": int(args.fpca_dim),
             "fpca_var_ratio": float(args.fpca_var_ratio),
             "fpca_max_dim": int(args.fpca_max_dim),

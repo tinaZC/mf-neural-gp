@@ -34,6 +34,44 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
+# ===== unified npj-style figure settings =====
+COLOR_HF = "#0072B2"        # blue
+COLOR_COK = "#E69F00"       # orange
+COLOR_OURS = "#009E73"      # green
+COLOR_RANDOM = "#CC79A7"    # purple
+
+def apply_npj_style():
+    plt.rcParams.update({
+        "font.family": "DejaVu Sans",
+        # overall text
+        "font.size": 13,
+        "axes.labelsize": 13,
+        "axes.titlesize": 13,
+        "xtick.labelsize": 12,
+        "ytick.labelsize": 12,
+        "legend.fontsize": 12,
+        "figure.titlesize": 13,
+
+        "axes.linewidth": 0.8,
+        "lines.linewidth": 1.8,
+        "xtick.major.width": 0.8,
+        "ytick.major.width": 0.8,
+        "xtick.major.size": 3.5,
+        "ytick.major.size": 3.5,
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+        "savefig.bbox": "tight",
+    })
+
+def add_panel_note(ax, text):
+    ax.text(
+        0.03, 0.97, text,
+        transform=ax.transAxes,
+        ha="left", va="top",
+        fontsize=13,
+    )
+
+
 
 HF_LFM_RE = re.compile(r"hf(\d+)_lfx(\d+)", re.IGNORECASE)
 SEED_RE = re.compile(r"seed(\d+)", re.IGNORECASE)
@@ -225,9 +263,9 @@ def plot_rmse_boxplots_smallmultiples(
 
     # (label, column, color, dodge_dx)  -- dx in categorical-x units
     methods = [
-        ("HF-only", "metrics.y_rmse.hf_only", "C0", -0.28),
-        ("co-kriging",     "metrics.y_rmse.ar1",     "C1",  0.00),
-        ("Ours",    "metrics.y_rmse.ours",    "C2", +0.28),
+        ("HF-only", "metrics.y_rmse.hf_only", COLOR_HF, -0.28),
+        ("co-kriging",     "metrics.y_rmse.ar1",     COLOR_COK,  0.00),
+        ("Ours",    "metrics.y_rmse.ours",    COLOR_OURS, +0.28),
     ]
 
     def _center(vals: np.ndarray) -> float:
@@ -359,7 +397,7 @@ def plot_rmse_boxplots_smallmultiples(
                         textcoords="offset points",
                         ha="center",
                         va=va,
-                        fontsize=10,
+                        fontsize=13,
                         color=ours_color,
                         bbox=dict(boxstyle="round,pad=0.18", fc="white", ec="none", alpha=0.72),
                         clip_on=True,
@@ -409,14 +447,14 @@ def plot_rmse_boxplots_smallmultiples(
                             _format_sci(mu, annotate_sci_sig),
                             ha="center",
                             va="bottom",
-                            fontsize=10,
+                            fontsize=13,
                             color=color,
                             bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.70),
                             clip_on=True,
                             zorder=5,
                         )
 
-            ax.set_title(f"LF = {pv}×HF" if panel_col == "lf_mult" else f"{panel_col}={pv}")
+            add_panel_note(ax, rf"$m_{{\mathrm{{LF}}}}={int(pv)}$")
             ax.set_xlabel(xlabel)
             ax.set_ylabel(ylabel)
             ax.grid(True, alpha=0.25)
@@ -465,13 +503,13 @@ def plot_rmse_boxplots_smallmultiples(
                             _format_sci(mu, annotate_sci_sig),
                             ha="center",
                             va="bottom",
-                            fontsize=10,
+                            fontsize=13,
                             color=color,
                             bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.70),
                             clip_on=True,
                         )
 
-            ax_top.set_title(f"LF = {pv}×HF" if panel_col == "lf_mult" else f"{panel_col}={pv}")
+            add_panel_note(ax_top, rf"$m_{{\mathrm{{LF}}}}={int(pv)}$")
             ax_top.set_ylabel(ylabel)
             ax_top.grid(True, alpha=0.25)
 
@@ -574,7 +612,7 @@ def plot_rmse_boxplots_smallmultiples(
                             txt,
                             ha="center",
                             va="bottom",
-                            fontsize=9.5,
+                            fontsize=13,
                             color=color,
                             rotation=0,
                             bbox=dict(boxstyle="round,pad=0.20", fc="white", ec="none", alpha=0.72),
@@ -591,7 +629,7 @@ def plot_rmse_boxplots_smallmultiples(
         else:
             # ---- legacy single-axis styles (box / errorbar) ----
             # (kept simple; your workflow uses boxline now)
-            ax.set_title(f"LF = {pv}×HF" if panel_col == "lf_mult" else f"{panel_col}={pv}")
+            add_panel_note(ax, rf"$m_{{\mathrm{{LF}}}}={int(pv)}$")
             ax.set_xlabel(xlabel)
             ax.set_ylabel(ylabel)
             ax.grid(True, alpha=0.25)
@@ -609,7 +647,8 @@ def plot_rmse_boxplots_smallmultiples(
             ax.set_xticks(x_ticks)
             ax.set_xticklabels(x_ticklabels)
 
-    fig.suptitle(title)
+    if str(title).strip():
+        fig.suptitle(title)
     fig.tight_layout()
     fig.savefig(str(out_png), dpi=170, bbox_inches="tight")
     plt.close(fig)
@@ -623,8 +662,8 @@ def heatmap_impr(pivot: pd.DataFrame, title: str, out_png: Path) -> None:
     im = ax.imshow(data, aspect="auto")
 
     ax.set_title(title)
-    ax.set_xlabel("LF multiplier")
-    ax.set_ylabel("HF budget")
+    ax.set_xlabel(r"$m_{\mathrm{LF}}$")
+    ax.set_ylabel(r"HF budget $N_h$")
 
     ax.set_xticks(np.arange(pivot.shape[1]))
     ax.set_xticklabels([str(x) for x in pivot.columns.tolist()])
@@ -635,7 +674,7 @@ def heatmap_impr(pivot: pd.DataFrame, title: str, out_png: Path) -> None:
         for j in range(pivot.shape[1]):
             v = data[i, j]
             if np.isfinite(v):
-                ax.text(j, i, f"{v:.1f}", ha="center", va="center", fontsize=9)
+                ax.text(j, i, f"{v:.1f}", ha="center", va="center", fontsize=13)
 
     plt.colorbar(im, ax=ax, shrink=0.9, label="Improvement %")
     plt.tight_layout()
@@ -708,34 +747,33 @@ def plot_impr_bar_by_hf(df: pd.DataFrame, hf_groups: List[int], out_png: Path) -
     x = np.arange(len(hf_groups), dtype=float)
     w = 0.34
 
-    plt.figure(figsize=(6.6, 4.8))
+    plt.figure(figsize=(18.6, 4.2))
     ax = plt.gca()
 
-    b1 = ax.bar(x - w/2, vals_hf, width=w, label="Ours vs HF-only (RMSE↓%)")
-    b2 = ax.bar(x + w/2, vals_ar1, width=w, label="Ours vs co-kriging (RMSE↓%)")
+    b1 = ax.bar(x - w/2, vals_hf, width=w, label="vs HF-only", color=COLOR_HF)
+    b2 = ax.bar(x + w/2, vals_ar1, width=w, label="vs co-kriging", color=COLOR_COK)
 
     # annotate
     def _annotate(bars):
         for bar in bars:
             h = bar.get_height()
             if np.isfinite(h):
-                ax.text(bar.get_x() + bar.get_width()/2, h, f"{h:.1f}%", ha="center", va="bottom", fontsize=10)
+                ax.text(bar.get_x() + bar.get_width()/2, h, f"{h:.1f}%", ha="center", va="bottom", fontsize=13)
 
     _annotate(b1)
     _annotate(b2)
 
     ax.set_xticks(x)
     ax.set_xticklabels([str(h) for h in hf_groups])
-    ax.set_xlabel("HF budget")
-    ax.set_ylabel("RMSE reduction (%)")
-    ax.set_title("Ours RMSE reduction vs baselines (mean over seeds and LF multipliers)")
+    ax.set_xlabel(r"HF budget $N_h$")
+    ax.set_ylabel(r"RMSE reduction (\%)")
     ax.axhline(0.0, alpha=0.3)
     ax.grid(True, axis="y", alpha=0.25)
     ax.legend()
 
     # show n under tick (optional but helpful)
     for xi, n in zip(x, ns):
-        ax.text(xi, ax.get_ylim()[0], f"n={n}", ha="center", va="bottom", fontsize=9, alpha=0.8)
+        ax.text(xi, ax.get_ylim()[0], f"n={n}", ha="center", va="bottom", fontsize=13, alpha=0.8)
 
     plt.tight_layout()
     plt.savefig(str(out_png), dpi=170, bbox_inches="tight")
@@ -763,9 +801,9 @@ def main() -> None:
                     help="Center statistic for RMSE curves: median (with quantile band) or mean (with ±std).")
     ap.add_argument("--show_seed_points", type=int, default=0, choices=[0, 1],
                     help="If 1, scatter seed points with jitter.")
-    ap.add_argument("--annotate_line_mean", type=int, default=1, choices=[0, 1],
+    ap.add_argument("--annotate_line_mean", type=int, default=0, choices=[0, 1],
                     help="If 1, annotate mean values on the TOP trend line points (even if center=median).")
-    ap.add_argument("--annotate_box_mean_var", type=int, default=1, choices=[0, 1],
+    ap.add_argument("--annotate_box_mean_var", type=int, default=0, choices=[0, 1],
                     help="If 1, annotate mean±variance (sample variance) in scientific notation near each box on the BOTTOM boxplot.")
     ap.add_argument("--annotate_line_digits", type=int, default=4,
                     help="Decimal digits for TOP mean annotations (non-scientific).")
@@ -780,6 +818,8 @@ def main() -> None:
     runs_root = Path(args.runs_root).expanduser().resolve()
     out_dir = Path(args.out_dir).expanduser().resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    apply_npj_style()
 
     # 1) rebuild sweep table from run folders
     df = build_sweep_table_from_runs(runs_root)
@@ -817,9 +857,9 @@ def main() -> None:
         annotate_line_digits=args.annotate_line_digits,
         annotate_sci_sig=args.annotate_sci_sig,
         # title=f"RMSE vs HF budget ({args.rmse_style}, center={args.center}, connect={args.connect}), split by LF multiplier",
-        title=f"RMSE vs HF budget, split by LF multiplier",
-        xlabel="HF budget",
-        ylabel="RMSE (test)",
+        title="",
+        xlabel=r"HF budget $N_h$",
+        ylabel="Test RMSE",
     )
 
     # plot_rmse_boxplots_smallmultiples(

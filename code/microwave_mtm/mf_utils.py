@@ -357,39 +357,240 @@ def make_ci_bands_for_curve(mean_y: np.ndarray, std_y: np.ndarray, ci_level: flo
     return {"lo": lo, "hi": hi}
 
 
+# def plot_case_3curves_spectrum(
+#     save_path: Path,
+#     freq: np.ndarray,
+#     y_hf_gt: np.ndarray,
+#     y_lf: np.ndarray,
+#     y_mf: np.ndarray,
+#     title: str = "",
+#     mf_band: Optional[dict] = None,
+# ):
+#     freq = np.asarray(freq)
+#     y_hf_gt = np.asarray(y_hf_gt)
+#     y_lf = np.asarray(y_lf)
+#     y_mf = np.asarray(y_mf)
+#
+#     fig = plt.figure(figsize=(6.0, 3.5))
+#     ax = plt.gca()
+#     ax.plot(freq, y_hf_gt, label="HF", linewidth=2.0)
+#     ax.plot(freq, y_lf, label="LF", linewidth=2.0)
+#     ax.plot(freq, y_mf, label="MF", linewidth=2.0)
+#
+#     if mf_band is not None:
+#         lo = np.asarray(mf_band["lo"])
+#         hi = np.asarray(mf_band["hi"])
+#         if np.any(np.isfinite(lo)) and np.any(np.isfinite(hi)):
+#             ax.fill_between(freq, lo, hi, alpha=0.20, linewidth=0)
+#
+#     ax.set_xlabel("Frequency (GHz)")
+#     ax.set_ylabel("Response")
+#     if title:
+#         ax.set_title(title)
+#     ax.legend(frameon=False)
+#     fig.tight_layout()
+#     fig.savefig(save_path, dpi=200)
+#     plt.close(fig)
+# ===== unified npj-style figure settings =====
+COLOR_HF = "#0072B2"        # blue
+COLOR_COK = "#E69F00"       # orange
+COLOR_OURS = "#009E73"      # green
+COLOR_RANDOM = "#CC79A7"    # purple
+
+
+def apply_npj_style():
+    import matplotlib.pyplot as plt
+    plt.rcParams.update({
+        "font.family": "DejaVu Sans",
+
+        # overall text
+        "font.size": 12,
+        "axes.labelsize": 12,
+        "axes.titlesize": 12,
+        "xtick.labelsize": 11,
+        "ytick.labelsize": 11,
+        "legend.fontsize": 11,
+        "figure.titlesize": 12,
+
+        "axes.linewidth": 0.8,
+        "lines.linewidth": 1.8,
+        "xtick.major.width": 0.8,
+        "ytick.major.width": 0.8,
+        "xtick.major.size": 3.5,
+        "ytick.major.size": 3.5,
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+        "savefig.bbox": "tight",
+    })
+
 def plot_case_3curves_spectrum(
-    save_path: Path,
-    freq: np.ndarray,
-    y_hf_gt: np.ndarray,
-    y_lf: np.ndarray,
-    y_mf: np.ndarray,
-    title: str = "",
-    mf_band: Optional[dict] = None,
+    *,
+    save_path,
+    wl=None,
+    freq=None,
+    y_hf_gt=None,
+    y_lf=None,
+    y_mf=None,
+    title="",
+    mf_band=None,
+    x_label=None,
+    y_label=None,
+    curve_labels=None,
+    band_label=None,
+    font_family="DejaVu Sans",
+    font_size=9,
+    tick_size=8,
+    legend_size=8,
 ):
-    freq = np.asarray(freq)
-    y_hf_gt = np.asarray(y_hf_gt)
-    y_lf = np.asarray(y_lf)
-    y_mf = np.asarray(y_mf)
+    """
+    Unified journal-style 3-curve spectrum plotter.
 
-    fig = plt.figure(figsize=(6.0, 3.5))
-    ax = plt.gca()
-    ax.plot(freq, y_hf_gt, label="HF", linewidth=2.0)
-    ax.plot(freq, y_lf, label="LF", linewidth=2.0)
-    ax.plot(freq, y_mf, label="MF", linewidth=2.0)
+    Backward compatible with existing calls:
+      - TM : plot_case_3curves_spectrum(save_path=..., wl=...,   y_hf_gt=..., y_lf=..., y_mf=..., title=..., mf_band=...)
+      - MTM: plot_case_3curves_spectrum(save_path=..., freq=..., y_hf_gt=..., y_lf=..., y_mf=..., title=..., mf_band=...)
 
+    New optional kwargs:
+      - x_label
+      - y_label
+      - curve_labels: {"hf": "...", "lf": "...", "mf": "..."}
+      - band_label
+      - font_family
+      - font_size
+      - tick_size
+      - legend_size
+    """
+    from pathlib import Path
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    save_path = Path(save_path)
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if wl is None and freq is None:
+        raise ValueError("plot_case_3curves_spectrum requires either wl=... or freq=...")
+    if wl is not None and freq is not None:
+        raise ValueError("plot_case_3curves_spectrum accepts only one of wl=... or freq=...")
+
+    x = np.asarray(wl if wl is not None else freq, dtype=float).reshape(-1)
+    y_hf_gt = np.asarray(y_hf_gt, dtype=float).reshape(-1)
+    y_lf = np.asarray(y_lf, dtype=float).reshape(-1)
+    y_mf = np.asarray(y_mf, dtype=float).reshape(-1)
+
+    n = x.shape[0]
+    if y_hf_gt.shape[0] != n or y_lf.shape[0] != n or y_mf.shape[0] != n:
+        raise ValueError(
+            f"Length mismatch: len(x)={n}, len(y_hf_gt)={y_hf_gt.shape[0]}, "
+            f"len(y_lf)={y_lf.shape[0]}, len(y_mf)={y_mf.shape[0]}"
+        )
+
+    # ===== unified labels =====
+    if curve_labels is None:
+        curve_labels = {
+            "hf": "HF target",
+            "lf": "LF",
+            "mf": "Neural-GP MF",
+        }
+
+    if x_label is None:
+        x_label = r"Wavelength $\lambda$ (nm)" if wl is not None else r"Frequency $f$ (GHz)"
+
+    if y_label is None:
+        y_label = "Response"
+
+    # ===== unified style =====
+    apply_npj_style()
+    plt.rcParams.update({
+        "font.family": font_family,
+        "font.size": font_size,
+        "axes.labelsize": font_size,
+        "axes.titlesize": font_size,
+        "xtick.labelsize": tick_size,
+        "ytick.labelsize": tick_size,
+        "legend.fontsize": legend_size,
+    })
+
+    # ===== unified colors: keep consistent with paper caption =====
+    c_hf = COLOR_HF       # blue
+    c_lf = COLOR_COK      # orange
+    c_mf = COLOR_OURS     # green
+
+    fig, ax = plt.subplots(figsize=(6.0, 3.5))
+
+    # HF target
+    ax.plot(
+        x, y_hf_gt,
+        color=c_hf,
+        linewidth=1.8,
+        linestyle="-",
+        label=curve_labels.get("hf", "HF target"),
+        zorder=3,
+    )
+
+    # LF
+    ax.plot(
+        x, y_lf,
+        color=c_lf,
+        linewidth=1.6,
+        linestyle="-",
+        label=curve_labels.get("lf", "LF"),
+        zorder=2,
+    )
+
+    # Neural-GP MF
+    ax.plot(
+        x, y_mf,
+        color=c_mf,
+        linewidth=1.8,
+        linestyle="-",
+        label=curve_labels.get("mf", "Neural-GP MF"),
+        zorder=4,
+    )
+
+    # Predictive interval (MF only)
+    lo = hi = None
     if mf_band is not None:
-        lo = np.asarray(mf_band["lo"])
-        hi = np.asarray(mf_band["hi"])
-        if np.any(np.isfinite(lo)) and np.any(np.isfinite(hi)):
-            ax.fill_between(freq, lo, hi, alpha=0.20, linewidth=0)
+        if not isinstance(mf_band, dict) or ("lo" not in mf_band) or ("hi" not in mf_band):
+            raise ValueError("mf_band must be a dict with keys {'lo', 'hi'}")
+        lo = np.asarray(mf_band["lo"], dtype=float).reshape(-1)
+        hi = np.asarray(mf_band["hi"], dtype=float).reshape(-1)
+        if lo.shape[0] != n or hi.shape[0] != n:
+            raise ValueError(
+                f"Band length mismatch: len(x)={n}, len(lo)={lo.shape[0]}, len(hi)={hi.shape[0]}"
+            )
 
-    ax.set_xlabel("Frequency (GHz)")
-    ax.set_ylabel("Response")
-    if title:
+        ax.fill_between(
+            x, lo, hi,
+            color=c_mf,
+            alpha=0.16,
+            linewidth=0.0,
+            label=band_label,
+            zorder=1,
+        )
+
+    # No in-figure title for paper figures unless explicitly requested
+    if str(title).strip():
         ax.set_title(title)
-    ax.legend(frameon=False)
+
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    ax.grid(True, alpha=0.25)
+    ax.set_axisbelow(True)
+
+    # y-limits with a small margin
+    y_all = [y_hf_gt, y_lf, y_mf]
+    if lo is not None and hi is not None:
+        y_all.extend([lo, hi])
+    y_all = np.concatenate([np.asarray(v, dtype=float).reshape(-1) for v in y_all])
+    y_all = y_all[np.isfinite(y_all)]
+    if y_all.size > 0:
+        y_min = float(np.min(y_all))
+        y_max = float(np.max(y_all))
+        y_span = max(y_max - y_min, 1e-12)
+        ax.set_ylim(y_min - 0.05 * y_span, y_max + 0.08 * y_span)
+
+    ax.legend(loc="best", frameon=False)
     fig.tight_layout()
-    fig.savefig(save_path, dpi=200)
+    fig.savefig(save_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
 
 

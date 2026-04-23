@@ -28,7 +28,9 @@ echo "[RUN] Plotting structural complexity figure..."
   --splits "train" \
   --r_latent 32 \
   --ridge 1e-6 \
-  --out_png "${OUT_PNG}"
+  --out_dir "${RUNS_ROOT}/structural_complexity" \
+  --out_lme "lme_vs_hf.png" \
+  --out_rank "effective_rank_vs_hf.png"
 
 echo "[DONE] Structural complexity reproduction finished."
-echo "       out_png = ${OUT_PNG}"
+

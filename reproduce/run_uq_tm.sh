@@ -12,9 +12,9 @@ RUNS_ROOT="${RUNS_ROOT:-${REPO_ROOT}/result_out/mf_sweep_runs_baseline_nano_tm}"
 
 # Keep this script explicit / fixed-path based.
 # You can still override BEST_CACHE_NPZ manually if needed.
-BEST_CACHE_NPZ="${BEST_CACHE_NPZ:-${RUNS_ROOT}/hf200_lfx10/seed333/bl0r333/cache/uq_cache_v1.npz}"
+BEST_CACHE_NPZ="${BEST_CACHE_NPZ:-${RUNS_ROOT}/hf100_lfx10/seed355/bl0r355/cache/uq_cache_v1.npz}"
 
-OUT_DIR="${OUT_DIR:-${REPO_ROOT}/result_out/figs_uq/uq_hf200x10_seed333}"
+OUT_DIR="${OUT_DIR:-${REPO_ROOT}/result_out/figs_uq/uq_hf100x10_seed355}"
 PLOT_SCRIPT="${PLOT_SCRIPT:-${CODE_ROOT}/nanophotonic_tm/plot_uq_from_cache.py}"
 
 if [[ ! -f "${BEST_CACHE_NPZ}" ]]; then

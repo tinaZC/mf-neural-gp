@@ -21,6 +21,44 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 import matplotlib.pyplot as plt
+
+# ===== unified npj-style figure settings =====
+COLOR_HF = "#0072B2"        # blue
+COLOR_COK = "#E69F00"       # orange
+COLOR_OURS = "#009E73"      # green
+COLOR_RANDOM = "#CC79A7"    # purple
+
+def apply_npj_style():
+    plt.rcParams.update({
+        "font.family": "DejaVu Sans",
+        # overall text
+        "font.size": 12,
+        "axes.labelsize": 12,
+        "axes.titlesize": 12,
+        "xtick.labelsize": 11,
+        "ytick.labelsize": 11,
+        "legend.fontsize": 11,
+        "figure.titlesize": 12,
+
+        "axes.linewidth": 0.8,
+        "lines.linewidth": 1.8,
+        "xtick.major.width": 0.8,
+        "ytick.major.width": 0.8,
+        "xtick.major.size": 3.5,
+        "ytick.major.size": 3.5,
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+        "savefig.bbox": "tight",
+    })
+
+def add_panel_note(ax, text):
+    ax.text(
+        0.03, 0.97, text,
+        transform=ax.transAxes,
+        ha="left", va="top",
+        fontsize=11,
+    )
+
 import numpy as np
 
 
@@ -133,7 +171,7 @@ def prettify_method_name(method: str) -> str:
         "hf_only": "HF-only",
         "ar1": "co-kriging",
         "ours_mean": "Ours",
-        "random": "random",
+        "random": "Random",
     }
     return mp.get(method, method)
 
@@ -158,6 +196,7 @@ def plot_aggregate_curve_only(
     dpi: int,
     title: str,
 ) -> None:
+    apply_npj_style()
     fig, ax = plt.subplots(figsize=(7.2, 4.6), constrained_layout=True)
 
     for method in methods:
@@ -179,12 +218,11 @@ def plot_aggregate_curve_only(
             linewidth=0.0,
         )
 
-    ax.set_xlabel("Number of known HF samples")
-    ax.set_ylabel("Best target RMSE in known set")
-    ax.set_title("(a) Aggregate acquisition curve")
+    ax.set_xlabel(r"Number of known HF samples, $N_h^{\mathrm{known}}$")
+    ax.set_ylabel("Best true target-matching RMSE in known set")
     ax.grid(alpha=0.25, linewidth=0.7)
-    ax.legend(frameon=False)
-
+    # ax.legend(frameon=False)
+    ax.legend(loc="upper right", frameon=False)
     if title.strip():
         fig.suptitle(title.strip())
 

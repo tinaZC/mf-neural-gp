@@ -2258,8 +2258,17 @@ def main():
                     y_hf_gt=y_hf_plot,
                     y_lf=y_lf_plot,
                     y_mf=y_st_plot,
-                    title=title_base + " | CI raw",
+                    # title=title_base + " | CI raw",
+                    title="",
                     mf_band=mf_band_raw,
+                    x_label=r"Frequency $f$ (GHz)",
+                    y_label=r"$20\log_{10}|S_{21}|$ (dB)",
+                    curve_labels={
+                        "hf": "HF target",
+                        "lf": "LF",
+                        "mf": "Neural-GP MF",
+                    },
+                    band_label=None,
                 )
 
                 mf_band_cal = None if std_st_plot_cal is None else make_ci_bands_for_curve(y_st_plot, std_st_plot_cal[0], ci_lvl)

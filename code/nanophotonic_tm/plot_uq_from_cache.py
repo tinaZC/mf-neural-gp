@@ -27,6 +27,44 @@ from typing import Any, Dict, List, Tuple
 import numpy as np
 import matplotlib.pyplot as plt
 
+# ===== unified npj-style figure settings =====
+COLOR_HF = "#0072B2"        # blue
+COLOR_COK = "#E69F00"       # orange
+COLOR_OURS = "#009E73"      # green
+COLOR_RANDOM = "#CC79A7"    # purple
+
+def apply_npj_style():
+    plt.rcParams.update({
+        "font.family": "DejaVu Sans",
+        # overall text
+        "font.size": 12,
+        "axes.labelsize": 12,
+        "axes.titlesize": 12,
+        "xtick.labelsize": 11,
+        "ytick.labelsize": 11,
+        "legend.fontsize": 11,
+        "figure.titlesize": 12,
+
+        "axes.linewidth": 0.8,
+        "lines.linewidth": 1.8,
+        "xtick.major.width": 0.8,
+        "ytick.major.width": 0.8,
+        "xtick.major.size": 3.5,
+        "ytick.major.size": 3.5,
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+        "savefig.bbox": "tight",
+    })
+
+def add_panel_note(ax, text):
+    ax.text(
+        0.03, 0.97, text,
+        transform=ax.transAxes,
+        ha="left", va="top",
+        fontsize=11,
+    )
+
+
 
 METHODS = ("hf_only", "ar1", "ours")
 
@@ -238,12 +276,12 @@ def compute_cov_width_points(cache: Dict[str, np.ndarray], ci_level: float) -> D
 
 
 def plot_fig1_reliability(out_png: Path, ci_grid: List[float], curves: Dict[str, List[float]]) -> None:
-    plt.figure(figsize=(6.8, 5.4))
-    ax = plt.gca()
+    apply_npj_style()
+    fig, ax = plt.subplots(figsize=(6.2, 5.2))
 
-    ax.plot([min(ci_grid), max(ci_grid)], [min(ci_grid), max(ci_grid)], linestyle=":", linewidth=2.0, label="ideal")
+    ax.plot([min(ci_grid), max(ci_grid)], [min(ci_grid), max(ci_grid)], linestyle=":", linewidth=2.0, label="Ideal")
 
-    label_map = {"hf_only": "HF-only", "ar1": "AR1", "ours": "Ours"}
+    label_map = {"hf_only": "HF-only", "ar1": "co-kriging", "ours": "Ours"}
     ece_lines: List[str] = []
 
     for m in METHODS:
@@ -252,10 +290,12 @@ def plot_fig1_reliability(out_png: Path, ci_grid: List[float], curves: Dict[str,
         ece_lines.append(f"{label_map.get(m, m)}  ECE={ece:.3f}")
         ax.plot(ci_grid, raw, linestyle="-", linewidth=2.2, label=label_map.get(m, m))
 
-    ax.set_xlabel("Nominal coverage (CI level)")
-    ax.set_ylabel("Empirical coverage (TEST)")
-    ax.set_title("Reliability curve (raw uncertainty)")
+    ax.set_xlabel("Nominal coverage")
+    ax.set_ylabel("Empirical coverage")
     ax.grid(True, alpha=0.25)
+    for spine in ax.spines.values():
+        spine.set_visible(True)
+        spine.set_alpha(0.95)
     ax.set_xlim(min(ci_grid), max(ci_grid))
 
     y_all = [y for m in METHODS for y in curves[m]]
@@ -272,23 +312,23 @@ def plot_fig1_reliability(out_png: Path, ci_grid: List[float], curves: Dict[str,
         transform=ax.transAxes,
         va="top",
         ha="left",
-        fontsize=9,
+        fontsize=11,
         bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.85, linewidth=0.8),
     )
 
-    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), borderaxespad=0.0, frameon=False, fontsize=9)
+    ax.legend(loc="lower right", frameon=True, fontsize=11)
 
     out_png.parent.mkdir(parents=True, exist_ok=True)
-    plt.tight_layout()
-    plt.savefig(out_png, dpi=300)
-    plt.close()
+    fig.tight_layout()
+    fig.savefig(out_png, dpi=300)
+    plt.close(fig)
 
 
 def plot_fig2_cov_width_tradeoff(out_png: Path, points: Dict[str, Dict[str, Tuple[float, float]]], *, ci_level: float) -> None:
-    plt.figure(figsize=(6.8, 5.4))
-    ax = plt.gca()
+    apply_npj_style()
+    fig, ax = plt.subplots(figsize=(6.2, 5.2))
 
-    label_map = {"hf_only": "HF-only", "ar1": "AR1", "ours": "Ours"}
+    label_map = {"hf_only": "HF-only", "ar1": "co-kriging", "ours": "Ours"}
 
     cov_all = []
     for m in METHODS:
@@ -301,7 +341,7 @@ def plot_fig2_cov_width_tradeoff(out_png: Path, points: Dict[str, Dict[str, Tupl
     x_lo = max(0.0, cmin - margin)
     x_hi = min(1.0, cmax + margin)
 
-    ax.axvline(float(ci_level), linestyle=":", linewidth=2.0, label=f"target={ci_level:.2f}")
+    ax.axvline(float(ci_level), linestyle=":", linewidth=2.0, label=f"Nominal {ci_level:.2f}")
 
     for m in METHODS:
         (cr, wr) = points[m]["raw"]
@@ -309,21 +349,28 @@ def plot_fig2_cov_width_tradeoff(out_png: Path, points: Dict[str, Dict[str, Tupl
         name = label_map.get(m, m)
 
         ax.scatter([cr], [wr], marker="x", s=70, label=f"{name} raw")
-        ax.scatter([cc], [wc], marker="o", s=55, label=f"{name} cal")
+        ax.scatter([cc], [wc], marker="o", s=55, label=f"{name} calibrated")
         ax.plot([cr, cc], [wr, wc], linewidth=1.4)
 
-    ax.set_xlabel("Empirical coverage (TEST)")
-    ax.set_ylabel("Mean interval width (TEST)")
-    ax.set_title(f"Coverage–Width trade-off at CI={ci_level:.2f}")
+    ax.set_xlabel("Empirical coverage")
+    ax.set_ylabel("Mean interval width (response units)")
     ax.grid(True, alpha=0.25)
+    for spine in ax.spines.values():
+        spine.set_visible(True)
+        spine.set_alpha(0.95)
     ax.set_xlim(x_lo, x_hi)
 
-    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0), borderaxespad=0.0, frameon=False, fontsize=9)
+    ax.legend(
+        loc="lower left",
+        bbox_to_anchor=(0.02, 0.02),
+        frameon=True,
+        fontsize=11
+    )
 
     out_png.parent.mkdir(parents=True, exist_ok=True)
-    plt.tight_layout()
-    plt.savefig(out_png, dpi=300)
-    plt.close()
+    fig.tight_layout()
+    fig.savefig(out_png, dpi=300)
+    plt.close(fig)
 
 
 def main() -> None:

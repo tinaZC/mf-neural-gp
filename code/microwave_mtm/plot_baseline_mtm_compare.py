@@ -12,14 +12,49 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+
+# ===== unified npj-style figure settings =====
+COLOR_HF = "#0072B2"        # blue
+COLOR_COK = "#E69F00"       # orange
+COLOR_OURS = "#009E73"      # green
+COLOR_RANDOM = "#CC79A7"    # purple
+
+def apply_npj_style():
+    plt.rcParams.update({
+        "font.family": "DejaVu Sans",
+        # overall text
+        "font.size": 12,
+        "axes.labelsize": 12,
+        "axes.titlesize": 12,
+        "xtick.labelsize": 11,
+        "ytick.labelsize": 11,
+        "legend.fontsize": 11,
+        "figure.titlesize": 12,
+
+        "axes.linewidth": 0.8,
+        "lines.linewidth": 1.8,
+        "xtick.major.width": 0.8,
+        "ytick.major.width": 0.8,
+        "xtick.major.size": 3.5,
+        "ytick.major.size": 3.5,
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+        "savefig.bbox": "tight",
+    })
+
+def add_panel_note(ax, text):
+    ax.text(
+        0.03, 0.97, text,
+        transform=ax.transAxes,
+        ha="left", va="top",
+        fontsize=11,
+    )
+
 from matplotlib.ticker import FuncFormatter
 
 HF_LFM_RE = re.compile(r"hf(\d+)_lfx(\d+)", re.IGNORECASE)
 SEED_RE = re.compile(r"seed(\d+)", re.IGNORECASE)
 
-BLUE = "#1f77b4"
-ORANGE = "#ff7f0e"
-GREEN = "#2ca02c"
 
 
 def parse_hf_lfmult_from_text(s: str) -> Tuple[Optional[int], Optional[int]]:
@@ -143,14 +178,15 @@ def pick_single_dataset(df: pd.DataFrame, hf: Optional[int], lfx: Optional[int])
 def plot_methods_panel(df: pd.DataFrame, out_png: Path) -> None:
     out_png.parent.mkdir(parents=True, exist_ok=True)
     methods = [
-        ("HF-only", "metrics.y_rmse.hf_only", BLUE),
-        ("co-kriging", "metrics.y_rmse.ar1", ORANGE),
-        ("Ours", "metrics.y_rmse.ours", GREEN),
+        ("HF-only", "metrics.y_rmse.hf_only", COLOR_HF),
+        ("co-kriging", "metrics.y_rmse.ar1", COLOR_COK),
+        ("Ours", "metrics.y_rmse.ours", COLOR_OURS),
     ]
     vals = [_finite(df[col].to_numpy(dtype=float)) for _, col, _ in methods]
     tags = [m[0] for m in methods]
     colors = [m[2] for m in methods]
 
+    apply_npj_style()
     fig, ax = plt.subplots(1, 1, figsize=(4.4, 3.5))
     positions = np.array([1.0, 2.0, 3.0], dtype=float)
 
@@ -236,7 +272,7 @@ def plot_methods_panel(df: pd.DataFrame, out_png: Path) -> None:
             f"{mu:.2e}±{sd:.2e}",
             ha="center",
             va="bottom",
-            fontsize=8,
+            fontsize=11,
             color=c,
             clip_on=False,
         )
@@ -246,12 +282,11 @@ def plot_methods_panel(df: pd.DataFrame, out_png: Path) -> None:
     ax.set_xlim(0.20, 3.80)
     ax.set_ylabel("Test RMSE")
     ax.ticklabel_format(axis="y", style="sci", scilimits=(0, 0))
-    ax.set_title("Test RMSE across methods")
     ax.grid(True, alpha=0.4)
     ax.set_axisbelow(True)
 
     n_runs = int(df.shape[0])
-    fig.text(0.965, 0.03, f"n={n_runs} runs", ha="right", va="bottom", fontsize=7.8)
+    fig.text(0.965, 0.03, f"n={n_runs} runs", ha="right", va="bottom", fontsize=11)
     plt.tight_layout(rect=[0.0, 0.07, 1.0, 0.95])
     plt.savefig(out_png, dpi=180, bbox_inches="tight")
     plt.close(fig)
@@ -262,31 +297,31 @@ def plot_improvement_panel(df: pd.DataFrame, out_png: Path) -> None:
     impr_vs_hf = _finite(improvement_percent(df["metrics.y_rmse.hf_only"].to_numpy(dtype=float), df["metrics.y_rmse.ours"].to_numpy(dtype=float)))
     impr_vs_ar1 = _finite(improvement_percent(df["metrics.y_rmse.ar1"].to_numpy(dtype=float), df["metrics.y_rmse.ours"].to_numpy(dtype=float)))
 
+    apply_npj_style()
     fig, ax = plt.subplots(1, 1, figsize=(4.1, 3.5))
-    bar_labels = ["Ours vs HF-only", "Ours vs co-kriging"]
+    bar_labels = ["vs HF-only", "vs co-kriging"]
     bar_vals = [
         float(np.mean(impr_vs_hf)) if impr_vs_hf.size else float("nan"),
         float(np.mean(impr_vs_ar1)) if impr_vs_ar1.size else float("nan"),
     ]
-    bar_colors = [BLUE, ORANGE]
+    bar_colors = [COLOR_HF, COLOR_COK]
     x = np.array([0.42, 0.74], dtype=float)
     ax.bar(x, bar_vals, width=0.12, color=bar_colors, linewidth=0)
     for xi, yi, c in zip(x, bar_vals, bar_colors):
         if np.isfinite(yi):
-            ax.text(xi, yi + 0.08, f"{yi:.1f}%", ha="center", va="bottom", fontsize=8.2, color=c)
+            ax.text(xi, yi + 0.08, f"{yi:.1f}%", ha="center", va="bottom", fontsize=11, color=c)
     ax.set_xlim(0.26, 0.90)
     ymax_bar = max(v for v in bar_vals if np.isfinite(v)) if any(np.isfinite(v) for v in bar_vals) else 1.0
     ax.set_ylim(0.0, max(13.4, ymax_bar + 1.0))
     ax.set_xticks(x)
     ax.set_xticklabels(bar_labels)
-    ax.set_ylabel("RMSE reduction (%)")
-    ax.set_title("Relative RMSE reduction of Ours")
+    ax.set_ylabel(r"RMSE reduction (\%)")
     ax.axhline(0.0, color="black", linewidth=0.8, alpha=0.30)
     ax.grid(True, axis="y", alpha=0.22)
     ax.set_axisbelow(True)
 
     n_runs = int(df.shape[0])
-    fig.text(0.965, 0.03, f"n={n_runs} runs", ha="right", va="bottom", fontsize=7.8)
+    fig.text(0.965, 0.03, f"n={n_runs} runs", ha="right", va="bottom", fontsize=11)
     plt.tight_layout(rect=[0.0, 0.07, 1.0, 0.95])
     plt.savefig(out_png, dpi=180, bbox_inches="tight")
     plt.close(fig)
