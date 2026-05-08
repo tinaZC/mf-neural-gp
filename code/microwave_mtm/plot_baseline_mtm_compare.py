@@ -180,7 +180,7 @@ def plot_methods_panel(df: pd.DataFrame, out_png: Path) -> None:
     methods = [
         ("HF-only", "metrics.y_rmse.hf_only", COLOR_HF),
         ("co-kriging", "metrics.y_rmse.ar1", COLOR_COK),
-        ("Ours", "metrics.y_rmse.ours", COLOR_OURS),
+        ("Neural–GP MF", "metrics.y_rmse.ours", COLOR_OURS),
     ]
     vals = [_finite(df[col].to_numpy(dtype=float)) for _, col, _ in methods]
     tags = [m[0] for m in methods]

@@ -21,17 +21,23 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 import matplotlib.pyplot as plt
+import numpy as np
 
 # ===== unified npj-style figure settings =====
-COLOR_HF = "#0072B2"        # blue
-COLOR_COK = "#E69F00"       # orange
-COLOR_OURS = "#009E73"      # green
-COLOR_RANDOM = "#CC79A7"    # purple
+
+COLOR_HF = "#1f77b4"
+COLOR_COK = "#ff7f0e"
+COLOR_OURS = "#2ca02c"
+COLOR_RANDOM = "#9467bd"
+
+# COLOR_HF = "#0072B2"        # blue
+# COLOR_COK = "#E69F00"       # orange
+# COLOR_OURS = "#009E73"      # green
+# COLOR_RANDOM = "#CC79A7"    # purple
 
 def apply_npj_style():
     plt.rcParams.update({
         "font.family": "DejaVu Sans",
-        # overall text
         "font.size": 12,
         "axes.labelsize": 12,
         "axes.titlesize": 12,
@@ -39,7 +45,6 @@ def apply_npj_style():
         "ytick.labelsize": 11,
         "legend.fontsize": 11,
         "figure.titlesize": 12,
-
         "axes.linewidth": 0.8,
         "lines.linewidth": 1.8,
         "xtick.major.width": 0.8,
@@ -51,6 +56,7 @@ def apply_npj_style():
         "savefig.bbox": "tight",
     })
 
+
 def add_panel_note(ax, text):
     ax.text(
         0.03, 0.97, text,
@@ -59,12 +65,11 @@ def add_panel_note(ax, text):
         fontsize=11,
     )
 
-import numpy as np
-
 
 # -----------------------------------------------------------------------------
 # IO helpers
 # -----------------------------------------------------------------------------
+
 
 def read_csv_rows(path: Path) -> List[dict]:
     with open(path, "r", encoding="utf-8", newline="") as f:
@@ -74,6 +79,7 @@ def read_csv_rows(path: Path) -> List[dict]:
 # -----------------------------------------------------------------------------
 # Summary parsing
 # -----------------------------------------------------------------------------
+
 
 def load_summary_table(summary_csv: Path, methods: List[str]) -> List[dict]:
     rows = read_csv_rows(summary_csv)
@@ -123,7 +129,10 @@ def group_curves(rows: List[dict]) -> Dict[str, Dict[int, Tuple[np.ndarray, np.n
     return out
 
 
-def build_common_budget_grid(curves: Dict[str, Dict[int, Tuple[np.ndarray, np.ndarray]]], methods: List[str]) -> np.ndarray:
+def build_common_budget_grid(
+    curves: Dict[str, Dict[int, Tuple[np.ndarray, np.ndarray]]],
+    methods: List[str],
+) -> np.ndarray:
     budgets: List[int] = []
     for method in methods:
         if method not in curves:
@@ -166,25 +175,70 @@ def aggregate_curve(
 # Plotting
 # -----------------------------------------------------------------------------
 
+
 def prettify_method_name(method: str) -> str:
     mp = {
         "hf_only": "HF-only",
         "ar1": "co-kriging",
-        "ours_mean": "Ours",
+        "ours_mean": "Neural–GP MF",
         "random": "Random",
     }
     return mp.get(method, method)
 
 
 def method_style(method: str) -> dict:
-    # use explicit colors so names stay consistent if the user changes method order
+    # Colors follow the unified paper palette. Markers make each acquisition step visible.
     styles = {
-        "hf_only": {"color": "#1f77b4", "linewidth": 2.2},
-        "ar1": {"color": "#ff7f0e", "linewidth": 2.2},
-        "ours_mean": {"color": "#2ca02c", "linewidth": 2.2},
-        "random": {"color": "#9467bd", "linewidth": 2.2},
+        "random": {
+            "color": COLOR_RANDOM,
+            "linewidth": 1.8,
+            "marker": "o",
+            "markersize": 5.0,
+            "markerfacecolor": "white",
+            "markeredgewidth": 1.1,
+            "fill_alpha": 0.07,
+            "zorder": 2,
+        },
+        "hf_only": {
+            "color": COLOR_HF,
+            "linewidth": 2.0,
+            "marker": "s",
+            "markersize": 5.0,
+            "markerfacecolor": "white",
+            "markeredgewidth": 1.1,
+            "fill_alpha": 0.10,
+            "zorder": 3,
+        },
+        "ar1": {
+            "color": COLOR_COK,
+            "linewidth": 2.0,
+            "marker": "^",
+            "markersize": 5.0,
+            "markerfacecolor": "white",
+            "markeredgewidth": 1.1,
+            "fill_alpha": 0.10,
+            "zorder": 4,
+        },
+        "ours_mean": {
+            "color": COLOR_OURS,
+            "linewidth": 2.3,
+            "marker": "*",
+            "markersize": 9.0,
+            "markerfacecolor": COLOR_OURS,
+            "markeredgewidth": 0.8,
+            "fill_alpha": 0.12,
+            "zorder": 5,
+        },
     }
-    return styles.get(method, {"linewidth": 2.2})
+    return styles.get(method, {
+        "linewidth": 2.0,
+        "marker": "o",
+        "markersize": 4.5,
+        "markerfacecolor": "white",
+        "markeredgewidth": 1.0,
+        "fill_alpha": 0.10,
+        "zorder": 3,
+    })
 
 
 def plot_aggregate_curve_only(
@@ -202,27 +256,77 @@ def plot_aggregate_curve_only(
     for method in methods:
         med, q25, q75 = aggregate_curve(curves, method, budgets)
         st = method_style(method)
-        ax.plot(
-            budgets,
-            med,
-            label=prettify_method_name(method),
-            color=st.get("color", None),
-            linewidth=st.get("linewidth", 2.2),
-        )
+
+        # Draw the IQR band first so the median line and markers remain visible.
         ax.fill_between(
             budgets,
             q25,
             q75,
             color=st.get("color", None),
-            alpha=0.18,
+            alpha=st.get("fill_alpha", 0.10),
             linewidth=0.0,
+            zorder=st.get("zorder", 3) - 1,
+        )
+
+        ax.plot(
+            budgets,
+            med,
+            label=prettify_method_name(method),
+            color=st.get("color", None),
+            linewidth=st.get("linewidth", 2.0),
+            marker=st.get("marker", "o"),
+            markersize=st.get("markersize", 4.5),
+            markerfacecolor=st.get("markerfacecolor", "white"),
+            markeredgecolor=st.get("color", None),
+            markeredgewidth=st.get("markeredgewidth", 1.0),
+            markevery=1,
+            zorder=st.get("zorder", 3),
         )
 
     ax.set_xlabel(r"Number of known HF samples, $N_h^{\mathrm{known}}$")
-    ax.set_ylabel("Best true target-matching RMSE in known set")
-    ax.grid(alpha=0.25, linewidth=0.7)
-    # ax.legend(frameon=False)
-    ax.legend(loc="upper right", frameon=False)
+    ax.set_ylabel("Best true target-matching RMSE")
+
+    # Acquisition budgets are discrete, so fixed ticks make the step structure clearer.
+    ax.set_xlim(int(budgets.min()) - 2, int(budgets.max()) + 2)
+    ax.set_xticks(np.arange(50, int(budgets.max()) + 1, 10))
+
+    # Add a small vertical margin so the bands do not touch the frame.
+    y_values = []
+    for method in methods:
+        med, q25, q75 = aggregate_curve(curves, method, budgets)
+        y_values.extend(q25.tolist())
+        y_values.extend(q75.tolist())
+        y_values.extend(med.tolist())
+    if y_values:
+        ymin = float(np.nanmin(y_values))
+        ymax = float(np.nanmax(y_values))
+        pad = 0.06 * max(ymax - ymin, 1e-6)
+        ax.set_ylim(ymin - pad, ymax + pad)
+
+    ax.grid(alpha=0.22, linewidth=0.6)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    # Force legend order: Random on top, Neural–GP MF at bottom.
+    handles, labels = ax.get_legend_handles_labels()
+    legend_order = ["Random", "HF-only", "co-kriging", "Neural–GP MF"]
+
+    handle_map = {lab: h for h, lab in zip(handles, labels)}
+    ordered_handles = [handle_map[lab] for lab in legend_order if lab in handle_map]
+    ordered_labels = [lab for lab in legend_order if lab in handle_map]
+
+    ax.legend(
+        ordered_handles,
+        ordered_labels,
+        loc="upper right",
+        frameon=True,
+        framealpha=0.85,
+        edgecolor="none",
+        handlelength=2.2,
+        borderpad=0.4,
+        labelspacing=0.4,
+    )
+
     if title.strip():
         fig.suptitle(title.strip())
 
@@ -235,12 +339,13 @@ def plot_aggregate_curve_only(
 # Main
 # -----------------------------------------------------------------------------
 
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--retro_dir", type=str, default="./retro_acq_runs_tm")
     ap.add_argument("--methods", type=str, default="hf_only,ar1,ours_mean,random")
     ap.add_argument("--title", type=str, default="")
-    ap.add_argument("--out_path", type=str, default="./retro_acq_runs_tm/main_paper_curve_only.png")
+    ap.add_argument("--out_path", type=str, default="./retro_acq_runs_tm/main_paper_curve_only_markers.png")
     ap.add_argument("--dpi", type=int, default=300)
     args = ap.parse_args()
 

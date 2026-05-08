@@ -122,7 +122,7 @@ def load_curves(df: pd.DataFrame) -> Tuple[pd.Series, Dict[str, Dict[str, Option
             "nll": {
                 "y": _get_series(df, "nll_test_cal"),
                 "std": None,
-                "ylabel": "Adjusted test NLL",
+                "ylabel": "Test NLL",
             },
             "coverage": {
                 "y": _get_series(df, "coverage_test_cal"),
@@ -150,7 +150,7 @@ def load_curves(df: pd.DataFrame) -> Tuple[pd.Series, Dict[str, Dict[str, Option
             "nll": {
                 "y": _get_series(df, "nll_test_cal_mean"),
                 "std": _get_series(df, "nll_test_cal_std"),
-                "ylabel": "Adjusted test NLL",
+                "ylabel": "Test NLL",
             },
             "coverage": {
                 "y": _get_series(df, "coverage_test_cal_mean"),
@@ -264,7 +264,7 @@ def plot_line_with_band(
     xx = np.asarray(x[mask], dtype=float)
     yy = np.asarray(y[mask], dtype=float)
 
-    ax.plot(
+    line, = ax.plot(
         xx, yy,
         color=color,
         linewidth=lw,
@@ -278,6 +278,8 @@ def plot_line_with_band(
         lo = yy - ss
         hi = yy + ss
         ax.fill_between(xx, lo, hi, color=color, alpha=alpha_fill, linewidth=0)
+
+    return line
 
 
 def annotate_best(
@@ -349,6 +351,10 @@ def make_2x2_figure(
     ax_a, ax_b = axes[0, 0], axes[0, 1]
     ax_c, ax_d = axes[1, 0], axes[1, 1]
 
+    # Show fewer x ticks to avoid crowding while keeping key dimensions 10 and 16.
+    x_ints = [int(v) for v in x.tolist()]
+    xticks_show = [t for t in [2, 4, 10, 16, 32, 64] if t in set(x_ints)]
+
     # (a) Recon RMSE
     plot_line_with_band(
         ax_a, x,
@@ -361,7 +367,7 @@ def make_2x2_figure(
         ylabel=curves["recon"]["ylabel"],
         title="",
     )
-    ax_a.set_xticks(list(map(int, x.tolist())))
+    ax_a.set_xticks(xticks_show)
     ax_a.set_ylim(*_pad_ylim(curves["recon"]["y"], frac=0.12))
 
     # (b) y_RMSE
@@ -381,7 +387,7 @@ def make_2x2_figure(
         ylabel=curves["y_rmse"]["ylabel"],
         title="",
     )
-    ax_b.set_xticks(list(map(int, x.tolist())))
+    ax_b.set_xticks(xticks_show)
     ax_b.set_ylim(*_pad_ylim(curves["y_rmse"]["y"], frac=0.15))
 
     # (c) Calibrated NLL
@@ -401,7 +407,7 @@ def make_2x2_figure(
         ylabel=curves["nll"]["ylabel"],
         title="",
     )
-    ax_c.set_xticks(list(map(int, x.tolist())))
+    ax_c.set_xticks(xticks_show)
     ax_c.set_ylim(*_pad_ylim(curves["nll"]["y"], frac=0.15))
 
     # (d) Coverage + CI width
@@ -424,7 +430,7 @@ def make_2x2_figure(
             ylabel="Coverage / interval width",
             title="",
         )
-        ax_d.set_xticks(list(map(int, x.tolist())))
+        ax_d.set_xticks(xticks_show)
     else:
         ax_d2 = ax_d.twinx()
 
@@ -432,7 +438,7 @@ def make_2x2_figure(
         labels = []
 
         if has_cov:
-            plot_line_with_band(
+            line_cov = plot_line_with_band(
                 ax_d, x, cov_y, cov_std,
                 color=c_cov, label="Coverage", marker="o"
             )
@@ -443,7 +449,7 @@ def make_2x2_figure(
                 color=c_cov,
                 alpha=0.6,
             )
-            handles.append(ax_d.lines[-1])
+            handles.append(line_cov)
             labels.append("Coverage")
             cov_lo, cov_hi = _pad_ylim(cov_y, frac=0.10)
             cov_lo = min(cov_lo, nominal_coverage - 0.01)
@@ -481,7 +487,7 @@ def make_2x2_figure(
             ylabel=curves["coverage"]["ylabel"] if has_cov else "Coverage",
             title="",
         )
-        ax_d.set_xticks(list(map(int, x.tolist())))
+        ax_d.set_xticks(xticks_show)
         ax_d.legend(handles, labels, loc="best", frameon=True)
 
     if figure_title.strip():

@@ -281,7 +281,7 @@ def plot_fig1_reliability(out_png: Path, ci_grid: List[float], curves: Dict[str,
 
     ax.plot([min(ci_grid), max(ci_grid)], [min(ci_grid), max(ci_grid)], linestyle=":", linewidth=2.0, label="Ideal")
 
-    label_map = {"hf_only": "HF-only", "ar1": "co-kriging", "ours": "Ours"}
+    label_map = {"hf_only": "HF-only", "ar1": "co-kriging", "ours": "Neural–GP MF"}
     ece_lines: List[str] = []
 
     for m in METHODS:
@@ -328,7 +328,7 @@ def plot_fig2_cov_width_tradeoff(out_png: Path, points: Dict[str, Dict[str, Tupl
     apply_npj_style()
     fig, ax = plt.subplots(figsize=(6.2, 5.2))
 
-    label_map = {"hf_only": "HF-only", "ar1": "co-kriging", "ours": "Ours"}
+    label_map = {"hf_only": "HF-only", "ar1": "co-kriging", "ours": "Neural–GP MF"}
 
     cov_all = []
     for m in METHODS:

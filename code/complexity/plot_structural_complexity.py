@@ -396,7 +396,7 @@ def plot_effective_rank_figure(
     _annotate_rank_point(ax, float(hfs_arr[idx]), float(tmst_rk_m[idx]), COLOR_TRANS)
 
     ax.set_xlabel(r"HF budget $N_h$")
-    ax.set_ylabel(r"Effective rank of $A$")
+    ax.set_ylabel(r"Effective rank")
     ax.grid(True, alpha=0.25)
     ax.legend(frameon=True, loc="best")
 

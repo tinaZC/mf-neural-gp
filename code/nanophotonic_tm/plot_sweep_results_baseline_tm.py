@@ -265,7 +265,7 @@ def plot_rmse_boxplots_smallmultiples(
     methods = [
         ("HF-only", "metrics.y_rmse.hf_only", COLOR_HF, -0.28),
         ("co-kriging",     "metrics.y_rmse.ar1",     COLOR_COK,  0.00),
-        ("Ours",    "metrics.y_rmse.ours",    COLOR_OURS, +0.28),
+        ("Neural–GP MF",    "metrics.y_rmse.ours",    COLOR_OURS, +0.28),
     ]
 
     def _center(vals: np.ndarray) -> float:
