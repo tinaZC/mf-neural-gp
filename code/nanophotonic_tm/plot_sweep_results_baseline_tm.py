@@ -457,7 +457,7 @@ def plot_rmse_boxplots_smallmultiples(
             add_panel_note(ax, rf"$m_{{\mathrm{{LF}}}}={int(pv)}$")
             ax.set_xlabel(xlabel)
             ax.set_ylabel(ylabel)
-            ax.grid(True, alpha=0.25)
+            ax.grid(False)
             ax.set_ylim(y_min - 0.05 * y_span, y_max + 0.12 * y_span)
 
             if pi == 0:
@@ -511,7 +511,7 @@ def plot_rmse_boxplots_smallmultiples(
 
             add_panel_note(ax_top, rf"$m_{{\mathrm{{LF}}}}={int(pv)}$")
             ax_top.set_ylabel(ylabel)
-            ax_top.grid(True, alpha=0.25)
+            ax_top.grid(False)
 
             # legend once (best effort)
             if pi == 0:
@@ -523,7 +523,7 @@ def plot_rmse_boxplots_smallmultiples(
             # ---- BOTTOM: dodged boxplots + seed points + annotations ----
             ax_bot.set_xlabel(xlabel)
             ax_bot.set_ylabel(ylabel)
-            ax_bot.grid(True, alpha=0.25)
+            ax_bot.grid(False)
 
             # gather for ylim padding
             all_bot = []
@@ -632,7 +632,7 @@ def plot_rmse_boxplots_smallmultiples(
             add_panel_note(ax, rf"$m_{{\mathrm{{LF}}}}={int(pv)}$")
             ax.set_xlabel(xlabel)
             ax.set_ylabel(ylabel)
-            ax.grid(True, alpha=0.25)
+            ax.grid(False)
             # plot centers (aligned x)
             for mi, (label, col, color, dx) in enumerate(methods):
                 ys = []
@@ -768,7 +768,7 @@ def plot_impr_bar_by_hf(df: pd.DataFrame, hf_groups: List[int], out_png: Path) -
     ax.set_xlabel(r"HF budget $N_h$")
     ax.set_ylabel(r"RMSE reduction (\%)")
     ax.axhline(0.0, alpha=0.3)
-    ax.grid(True, axis="y", alpha=0.25)
+    ax.grid(False)
     ax.legend()
 
     # show n under tick (optional but helpful)
@@ -778,6 +778,426 @@ def plot_impr_bar_by_hf(df: pd.DataFrame, hf_groups: List[int], out_png: Path) -
     plt.tight_layout()
     plt.savefig(str(out_png), dpi=170, bbox_inches="tight")
     plt.close()
+
+
+
+def plot_composite_rmse_figure(
+    df: pd.DataFrame,
+    hf_groups: List[int],
+    out_dir: Path,
+    out_stem: str,
+    *,
+    connect: str = "none",
+    center: str = "median",
+    show_seed_points: int = 0,
+    annotate_line_mean: int = 0,
+    annotate_box_mean_var: int = 0,
+    annotate_sci_sig: int = 2,
+) -> None:
+    """
+    Direct publication composite:
+      (a) three RMSE small-multiple panels over m_LF
+      (b) RMSE-reduction bar chart
+
+    The complete figure is drawn directly with Matplotlib; no raster
+    post-composition (image.py/PIL) is required.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    x_values = sorted(df["hf"].dropna().unique().tolist())
+    panel_values = sorted(df["lf_mult"].dropna().unique().tolist())
+
+    if len(panel_values) != 3:
+        raise RuntimeError(
+            "Publication composite expects exactly three LF multipliers; "
+            f"found {panel_values}"
+        )
+
+    x_pos_map = {xv: float(i) for i, xv in enumerate(x_values)}
+    x_ticks = np.arange(len(x_values), dtype=float)
+    x_ticklabels = [
+        str(int(x)) if float(x).is_integer() else str(x)
+        for x in x_values
+    ]
+
+    methods = [
+        ("HF-only", "metrics.y_rmse.hf_only", COLOR_HF),
+        ("co-kriging", "metrics.y_rmse.ar1", COLOR_COK),
+        ("Neural–GP MF", "metrics.y_rmse.ours", COLOR_OURS),
+    ]
+
+    def _center_local(vals):
+        v = _finite(np.asarray(vals, dtype=float))
+        if v.size == 0:
+            return np.nan
+        if str(center).lower() == "mean":
+            return float(np.mean(v))
+        return float(np.median(v))
+
+    def _format_sci_local(x):
+        if not np.isfinite(x):
+            return "nan"
+        return f"{x:.{int(annotate_sci_sig)}e}"
+
+    # Match the physical proportions of the former two raster figures:
+    # top ~18.6x8.2, bottom ~18.6x4.2.
+    fig = plt.figure(figsize=(18.6, 12.4))
+    gs = fig.add_gridspec(
+        2,
+        3,
+        height_ratios=[8.2, 4.2],
+        wspace=0.16,
+        hspace=0.34,
+    )
+
+    top_axes = []
+
+    # ------------------------------------------------------------------
+    # (a) RMSE small multiples
+    # ------------------------------------------------------------------
+    for pi, pv in enumerate(panel_values):
+        ax = fig.add_subplot(gs[0, pi])
+        top_axes.append(ax)
+
+        sub = df[df["lf_mult"] == pv].copy()
+
+        all_vals = []
+        for _, col, _ in methods:
+            v = _finite(sub[col].to_numpy(dtype=float))
+            if v.size:
+                all_vals.append(v)
+
+        if not all_vals:
+            raise RuntimeError(f"No finite RMSE values for lf_mult={pv}")
+
+        all_v = np.concatenate(all_vals)
+        y_min = float(np.min(all_v))
+        y_max = float(np.max(all_v))
+        y_span = max(1e-12, y_max - y_min)
+
+        # Ours-only boxplots, exactly as in the current overlay route.
+        ours_col = "metrics.y_rmse.ours"
+        ours_color = "C2"
+
+        data_list = []
+        pos_list = []
+
+        for xv in x_values:
+            vals = _finite(
+                sub[sub["hf"] == xv][ours_col].to_numpy(dtype=float)
+            )
+            if vals.size == 0:
+                continue
+            data_list.append(vals)
+            pos_list.append(x_pos_map[xv])
+
+        if data_list:
+            bp = ax.boxplot(
+                data_list,
+                positions=pos_list,
+                widths=0.34,
+                patch_artist=True,
+                showfliers=False,
+                manage_ticks=False,
+            )
+
+            for patch in bp["boxes"]:
+                patch.set_facecolor(ours_color)
+                patch.set_alpha(0.18)
+                patch.set_edgecolor(ours_color)
+                patch.set_linewidth(1.8)
+
+            for key in ("whiskers", "caps"):
+                for ln in bp[key]:
+                    ln.set_color(ours_color)
+                    ln.set_linewidth(1.6)
+
+            for med in bp["medians"]:
+                med.set_color(ours_color)
+                med.set_linewidth(2.4)
+
+        # Optional seed points, preserving the existing behavior.
+        if int(show_seed_points) == 1:
+            rng = np.random.default_rng(12345 + pi)
+            for xv in x_values:
+                vals = _finite(
+                    sub[sub["hf"] == xv][ours_col].to_numpy(dtype=float)
+                )
+                if vals.size == 0:
+                    continue
+
+                xs = (
+                    x_pos_map[xv]
+                    + rng.uniform(-0.06, 0.06, size=vals.size)
+                )
+                ax.scatter(
+                    xs,
+                    vals,
+                    s=16,
+                    alpha=0.55,
+                    color=ours_color,
+                    edgecolors="none",
+                    zorder=3,
+                )
+
+        # Three method curves.
+        for mi, (label, col, color) in enumerate(methods):
+            ys = []
+
+            for xv in x_values:
+                vals = sub[sub["hf"] == xv][col].to_numpy(dtype=float)
+                ys.append(_center_local(vals))
+
+            ys = np.asarray(ys, dtype=float)
+
+            linestyle = "--" if str(connect).lower() == "dashed" else "-"
+
+            ax.plot(
+                x_ticks,
+                ys,
+                marker="o",
+                linestyle=linestyle,
+                label=label,
+                color=color,
+                linewidth=1.8,
+                zorder=4,
+            )
+
+            if int(annotate_line_mean) == 1 and col != ours_col:
+                for j, xv in enumerate(x_values):
+                    vals = _finite(
+                        sub[sub["hf"] == xv][col].to_numpy(dtype=float)
+                    )
+                    if vals.size == 0 or not np.isfinite(ys[j]):
+                        continue
+
+                    mu = float(np.mean(vals))
+                    dy = (0.02 + 0.010 * mi) * y_span
+
+                    if label == "co-kriging" and j == len(x_values) - 1:
+                        dy += 0.05 * y_span
+
+                    ax.text(
+                        x_ticks[j],
+                        ys[j] + dy,
+                        _format_sci_local(mu),
+                        ha="center",
+                        va="bottom",
+                        fontsize=13,
+                        color=color,
+                        bbox=dict(
+                            boxstyle="round,pad=0.15",
+                            fc="white",
+                            ec="none",
+                            alpha=0.70,
+                        ),
+                        clip_on=True,
+                        zorder=5,
+                    )
+
+        if int(annotate_box_mean_var) == 1:
+            for xv in x_values:
+                vals = _finite(
+                    sub[sub["hf"] == xv][ours_col].to_numpy(dtype=float)
+                )
+                if vals.size == 0:
+                    continue
+
+                mu, sd = _mean_std(vals)
+                if not np.isfinite(mu) or not np.isfinite(sd):
+                    continue
+
+                x0 = x_pos_map[xv]
+                y_anchor = float(np.min(vals))
+                dx_pts = 0
+
+                if xv == x_values[0]:
+                    dx_pts += 22
+                if xv == x_values[-1]:
+                    dx_pts -= 22
+
+                y_off_pts = -8
+
+                if (pi == 0) and (xv == 100):
+                    y_off_pts += 6
+
+                ax.annotate(
+                    f"{_format_sci_local(mu)}±{_format_sci_local(sd)}",
+                    (x0, y_anchor),
+                    xytext=(dx_pts, y_off_pts),
+                    textcoords="offset points",
+                    ha="center",
+                    va="top",
+                    fontsize=13,
+                    color=ours_color,
+                    bbox=dict(
+                        boxstyle="round,pad=0.18",
+                        fc="white",
+                        ec="none",
+                        alpha=0.72,
+                    ),
+                    clip_on=True,
+                    zorder=5,
+                )
+
+        add_panel_note(ax, rf"$m_{{\mathrm{{LF}}}}={int(pv)}$")
+        ax.set_xlabel(r"HF budget $N_h$")
+        ax.set_ylabel("Test RMSE")
+        ax.set_xticks(x_ticks)
+        ax.set_xticklabels(x_ticklabels)
+
+        # Publication figure: no background grid.
+        ax.grid(False)
+
+        ax.set_ylim(
+            y_min - 0.05 * y_span,
+            y_max + 0.12 * y_span,
+        )
+
+        if pi == 0:
+            ax.legend(
+                loc="upper right",
+                frameon=False,
+            )
+
+    # ------------------------------------------------------------------
+    # (b) Improvement bar chart
+    # ------------------------------------------------------------------
+    axb = fig.add_subplot(gs[1, :])
+
+    bar_df = df.copy()
+
+    hf_groups = [
+        int(h)
+        for h in hf_groups
+        if int(h) <= 500 and int(h) in bar_df["hf"].unique().tolist()
+    ]
+
+    if not hf_groups:
+        hf_groups = sorted(bar_df["hf"].unique().tolist())[:4]
+
+    bar_df = bar_df[bar_df["hf"].isin(hf_groups)].copy()
+
+    bar_df["impr_ours_vs_hf"] = improvement_percent(
+        bar_df["metrics.y_rmse.hf_only"].to_numpy(),
+        bar_df["metrics.y_rmse.ours"].to_numpy(),
+    )
+    bar_df["impr_ours_vs_ar1"] = improvement_percent(
+        bar_df["metrics.y_rmse.ar1"].to_numpy(),
+        bar_df["metrics.y_rmse.ours"].to_numpy(),
+    )
+
+    vals_hf = []
+    vals_ar1 = []
+    ns = []
+
+    for hf in hf_groups:
+        g = bar_df[bar_df["hf"] == hf]
+
+        v1 = _finite(g["impr_ours_vs_hf"].to_numpy(dtype=float))
+        v2 = _finite(g["impr_ours_vs_ar1"].to_numpy(dtype=float))
+
+        vals_hf.append(
+            float(np.mean(v1)) if v1.size else float("nan")
+        )
+        vals_ar1.append(
+            float(np.mean(v2)) if v2.size else float("nan")
+        )
+        ns.append(int(g.shape[0]))
+
+    xb = np.arange(len(hf_groups), dtype=float)
+    width = 0.34
+
+    b1 = axb.bar(
+        xb - width / 2,
+        vals_hf,
+        width=width,
+        label="vs HF-only",
+        color=COLOR_HF,
+    )
+    b2 = axb.bar(
+        xb + width / 2,
+        vals_ar1,
+        width=width,
+        label="vs co-kriging",
+        color=COLOR_COK,
+    )
+
+    for bars in (b1, b2):
+        for bar in bars:
+            height = bar.get_height()
+            if np.isfinite(height):
+                axb.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    height,
+                    f"{height:.1f}%",
+                    ha="center",
+                    va="bottom",
+                    fontsize=13,
+                )
+
+    axb.set_xticks(xb)
+    axb.set_xticklabels([str(h) for h in hf_groups])
+    axb.set_xlabel(r"HF budget $N_h$")
+    axb.set_ylabel(r"RMSE reduction (\%)")
+
+    # Keep only the scientifically meaningful zero reference line.
+    axb.axhline(0.0, linewidth=0.8, alpha=0.35)
+
+    # No background grid.
+    axb.grid(False)
+
+    axb.legend(frameon=False)
+
+    # Preserve current n annotations.
+    ymin = axb.get_ylim()[0]
+    for xi, n in zip(xb, ns):
+        axb.text(
+            xi,
+            ymin,
+            f"n={n}",
+            ha="center",
+            va="bottom",
+            fontsize=13,
+            alpha=0.8,
+        )
+
+    # Composite panel labels; no PIL post-processing required.
+    top_axes[0].text(
+        -0.14,
+        1.10,
+        "(a)",
+        transform=top_axes[0].transAxes,
+        ha="left",
+        va="bottom",
+        fontsize=14,
+    )
+    axb.text(
+        -0.035,
+        1.10,
+        "(b)",
+        transform=axb.transAxes,
+        ha="left",
+        va="bottom",
+        fontsize=14,
+    )
+
+    out_png = out_dir / f"{out_stem}.png"
+    out_pdf = out_dir / f"{out_stem}.pdf"
+
+    fig.savefig(
+        out_png,
+        dpi=300,
+        bbox_inches="tight",
+    )
+    fig.savefig(
+        out_pdf,
+        bbox_inches="tight",
+    )
+    plt.close(fig)
+
+    print(f"[DONE] wrote composite PNG: {out_png}")
+    print(f"[DONE] wrote composite PDF: {out_pdf}")
 
 
 def main() -> None:
@@ -790,6 +1210,12 @@ def main() -> None:
                     help="Root directory that contains dataset/seed subfolders and report.json files.")
     ap.add_argument("--out_dir", type=str,
                     default="../../result_out/mf_sweep_runs_baseline_nano_tm/plot_result_baseline_nano_tm")
+    ap.add_argument(
+        "--sweep_csv",
+        type=str,
+        default="",
+        help="Optional frozen sweep_results_rebuilt.csv. If supplied, use it directly instead of rescanning report.json.",
+    )
     ap.add_argument("--only_ok", type=int, default=1, choices=[0, 1])
     ap.add_argument("--q_lo", type=float, default=0.25)
     ap.add_argument("--q_hi", type=float, default=0.75)
@@ -821,9 +1247,21 @@ def main() -> None:
 
     apply_npj_style()
 
-    # 1) rebuild sweep table from run folders
-    df = build_sweep_table_from_runs(runs_root)
-    (out_dir / "sweep_results_rebuilt.csv").write_text(df.to_csv(index=False), encoding="utf-8")
+    # 1) Load the confirmed frozen sweep table when supplied;
+    # otherwise preserve the original report.json rebuild route.
+    if str(args.sweep_csv).strip():
+        sweep_csv = Path(args.sweep_csv).expanduser().resolve()
+        if not sweep_csv.exists():
+            raise FileNotFoundError(f"Frozen sweep CSV not found: {sweep_csv}")
+        df = pd.read_csv(sweep_csv)
+        print(f"[INFO] using frozen sweep CSV: {sweep_csv}")
+    else:
+        df = build_sweep_table_from_runs(runs_root)
+        (out_dir / "sweep_results_rebuilt.csv").write_text(
+            df.to_csv(index=False),
+            encoding="utf-8",
+        )
+        print(f"[INFO] rebuilt sweep table from: {runs_root}")
 
     if int(args.only_ok) == 1:
         df = df[df["status"] == "OK"].copy()
@@ -913,6 +1351,20 @@ def main() -> None:
         # fallback: choose up to 4 smallest hf budgets present
         hf_groups = sorted(df["hf"].unique().tolist())[:4]
     plot_impr_bar_by_hf(df, hf_groups, out_dir / "impr_bar_by_hf_ours_vs_baselines.png")
+
+    # Final publication composite: replaces the old image.py stitching step.
+    plot_composite_rmse_figure(
+        df=df,
+        hf_groups=hf_groups,
+        out_dir=out_dir,
+        out_stem="_fig_tm_rmse",
+        connect=args.connect,
+        center=args.center,
+        show_seed_points=args.show_seed_points,
+        annotate_line_mean=args.annotate_line_mean,
+        annotate_box_mean_var=args.annotate_box_mean_var,
+        annotate_sci_sig=args.annotate_sci_sig,
+    )
 
     print(f"[DONE] runs_root: {runs_root}")
     print(f"[DONE] saved outputs to: {out_dir}")

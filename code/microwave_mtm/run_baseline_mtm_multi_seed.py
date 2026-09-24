@@ -23,8 +23,8 @@ What it does
 Example
 -------
 python run_m013_baseline_multi_seed.py \
-  --data_dir /mnt/sdb/tzc/mf_dnn_sgp/mtm_013/mf_dataset_mw_m013/hf50_lfx10 \
-  --out_root /mnt/sdb/tzc/mf_dnn_sgp/mtm_013/mf_baseline_out_microwave_m013_multi \
+  --data_dir data/mf_dataset_mw_mtm/hf50_lfx10 \
+  --out_root result_out/mf_baseline_out_microwave_mtm_multi \
   --seeds 1-20 \
   --device cuda
 """

@@ -100,10 +100,8 @@ At present, this benchmark remains organized as its own benchmark-specific stack
 Code for the **retrospective HF acquisition** experiment.
 
 Main scripts:
-- `acquisition_with_baseline_tm.py`  
-  Runs the retrospective target-oriented HF acquisition experiment on the transmission benchmark.
 - `acquisition_baseline_tm.py`  
-  Auxiliary acquisition-related script for the transmission benchmark.
+  Implements retrospective target-oriented HF acquisition on the transmission benchmark. Git commit `7978d348` renamed the implementation to this path without changing its contents at that commit. Its summary schema matches the frozen CSV, but the exact frozen-run invocation is unverified. The public wrapper plots the saved summary only; it never launches acquisition training.
 - `plot_retro_acq_curve.py`  
   Plots the aggregate acquisition curve from the generated acquisition summary.
 
@@ -198,3 +196,27 @@ This order reflects the current structure more accurately than the older README:
 - Benchmark-specific files such as `mf_train_tm.py`, `mf_baseline_tm.py`, `mf_train_ab.py`, and `mf_baseline_ab.py` should now be interpreted mainly as **task-facing wrappers / entry scripts**, not as the only place where the core model logic lives.
 - The new `mf_train_baseline/` package is the intended place to look for the consolidated nanophotonic training and baseline implementation.
 - Local `mf_utils.py` files under other directories (for example `microwave_mtm/` and `fpca/`) remain module-specific helper code rather than part of the shared nanophotonic backend.
+
+## Revision implementations and final analysis
+
+- `comparison_methods/{common,nargp_core,fpca_nargp,freqwise_nargp,
+  mf_deeponet,direct_latent}.py` contains independent reviewer comparison
+  methods. FPCA-NARGP and MF-DeepONet are main TM/AB comparisons;
+  frequency-wise NARGP and direct-latent are TM diagnostics.
+- The approved publication generators are `nanophotonic_tm/
+  {plot_tm_representative_example,plot_tm_rmse_sweep_publication,
+  plot_uq_comparison,plot_uq_conformal_supplement,
+  plot_ablation_publication}.py`, `nanophotonic_ab/
+  plot_ab_rmse_sweep_publication.py`, and `microwave_mtm/
+  plot_mtm_result_publication.py`. Native UQ and conformal UQ have distinct
+  inputs and output names.
+- `fpca/rebuild_fpca_dim_sweep_native.py` processes a separately specified
+  historical archive without fitting models. `efficiency/`, `complexity/`
+  and `hf_acquisition/` own their respective revised plots.
+- Frozen result audits, timing comparison and final accuracy/UQ/paired-CI
+  aggregation scripts live in `reproduce/`, not `result_out/`.
+
+Exact frozen inputs, commands, actual figure filenames and manual geometry
+assets are listed in [figure provenance](../docs/figure_provenance.md).
+Running a training wrapper is not required to regenerate plots from saved
+results.

@@ -23,6 +23,17 @@ from typing import Dict, List, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_RETRO_DIR = REPO_ROOT / "result_out/final_analysis/frozen_inputs/acquisition"
+DEFAULT_OUT = REPO_ROOT / "result_out/final_analysis/figures/_fig_acquisition_tm.pdf"
+
+
+# ---------------------------------------------------------------------
+# Publication legend ordering
+# Keep plotting/data order unchanged; only move the proposed method
+# "Neural-GP MF" to the final legend position.
+# ---------------------------------------------------------------------
+
 # ===== unified npj-style figure settings =====
 
 COLOR_HF = "#1f77b4"
@@ -38,13 +49,13 @@ COLOR_RANDOM = "#9467bd"
 def apply_npj_style():
     plt.rcParams.update({
         "font.family": "DejaVu Sans",
-        "font.size": 12,
-        "axes.labelsize": 12,
-        "axes.titlesize": 12,
-        "xtick.labelsize": 11,
-        "ytick.labelsize": 11,
-        "legend.fontsize": 11,
-        "figure.titlesize": 12,
+        "font.size": 13,
+        "axes.labelsize": 13,
+        "axes.titlesize": 13,
+        "xtick.labelsize": 12,
+        "ytick.labelsize": 12,
+        "legend.fontsize": 12,
+        "figure.titlesize": 13,
         "axes.linewidth": 0.8,
         "lines.linewidth": 1.8,
         "xtick.major.width": 0.8,
@@ -179,7 +190,7 @@ def aggregate_curve(
 def prettify_method_name(method: str) -> str:
     mp = {
         "hf_only": "HF-only",
-        "ar1": "co-kriging",
+        "ar1": "AR1 / co-kriging",
         "ours_mean": "Neural–GP MF",
         "random": "Random",
     }
@@ -191,12 +202,13 @@ def method_style(method: str) -> dict:
     styles = {
         "random": {
             "color": COLOR_RANDOM,
-            "linewidth": 1.8,
+            "linewidth": 1.5,
             "marker": "o",
-            "markersize": 5.0,
+            "markersize": 4.5,
             "markerfacecolor": "white",
-            "markeredgewidth": 1.1,
-            "fill_alpha": 0.07,
+            "markeredgewidth": 1.0,
+            "line_alpha": 0.78,
+            "fill_alpha": 0.04,
             "zorder": 2,
         },
         "hf_only": {
@@ -206,7 +218,7 @@ def method_style(method: str) -> dict:
             "markersize": 5.0,
             "markerfacecolor": "white",
             "markeredgewidth": 1.1,
-            "fill_alpha": 0.10,
+            "fill_alpha": 0.07,
             "zorder": 3,
         },
         "ar1": {
@@ -216,7 +228,7 @@ def method_style(method: str) -> dict:
             "markersize": 5.0,
             "markerfacecolor": "white",
             "markeredgewidth": 1.1,
-            "fill_alpha": 0.10,
+            "fill_alpha": 0.07,
             "zorder": 4,
         },
         "ours_mean": {
@@ -226,7 +238,7 @@ def method_style(method: str) -> dict:
             "markersize": 9.0,
             "markerfacecolor": COLOR_OURS,
             "markeredgewidth": 0.8,
-            "fill_alpha": 0.12,
+            "fill_alpha": 0.09,
             "zorder": 5,
         },
     }
@@ -280,6 +292,7 @@ def plot_aggregate_curve_only(
             markeredgecolor=st.get("color", None),
             markeredgewidth=st.get("markeredgewidth", 1.0),
             markevery=1,
+            alpha=st.get("line_alpha", 1.0),
             zorder=st.get("zorder", 3),
         )
 
@@ -303,13 +316,13 @@ def plot_aggregate_curve_only(
         pad = 0.06 * max(ymax - ymin, 1e-6)
         ax.set_ylim(ymin - pad, ymax + pad)
 
-    ax.grid(alpha=0.22, linewidth=0.6)
+    ax.grid(False)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
 
-    # Force legend order: Random on top, Neural–GP MF at bottom.
+    # Force publication legend order: random reference first, proposed method last.
     handles, labels = ax.get_legend_handles_labels()
-    legend_order = ["Random", "HF-only", "co-kriging", "Neural–GP MF"]
+    legend_order = ["Random", "HF-only", "AR1 / co-kriging", "Neural–GP MF"]
 
     handle_map = {lab: h for h, lab in zip(handles, labels)}
     ordered_handles = [handle_map[lab] for lab in legend_order if lab in handle_map]
@@ -319,9 +332,7 @@ def plot_aggregate_curve_only(
         ordered_handles,
         ordered_labels,
         loc="upper right",
-        frameon=True,
-        framealpha=0.85,
-        edgecolor="none",
+        frameon=False,
         handlelength=2.2,
         borderpad=0.4,
         labelspacing=0.4,
@@ -342,10 +353,10 @@ def plot_aggregate_curve_only(
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--retro_dir", type=str, default="./retro_acq_runs_tm")
+    ap.add_argument("--retro_dir", type=str, default=str(DEFAULT_RETRO_DIR))
     ap.add_argument("--methods", type=str, default="hf_only,ar1,ours_mean,random")
     ap.add_argument("--title", type=str, default="")
-    ap.add_argument("--out_path", type=str, default="./retro_acq_runs_tm/main_paper_curve_only_markers.png")
+    ap.add_argument("--out_path", type=str, default=str(DEFAULT_OUT))
     ap.add_argument("--dpi", type=int, default=300)
     args = ap.parse_args()
 

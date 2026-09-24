@@ -205,3 +205,53 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Local agent instructions (not part of the public scientific release).
+/.agents/
+/AGENTS.md
+
+# Prepared datasets are distributed separately; retain local copies on disk.
+/data/mf_dataset_mw_mtm/
+/data/mf_sweep_datasets_nano_ab/
+/data/mf_sweep_datasets_nano_tm/
+
+# Frozen raw experiments and local validation outputs.
+/result_out/final_runs/original/
+/result_out/final_runs/comparisons/
+/result_out/final_runs/representation/
+/result_out/final_runs/wavelength_gp/
+/result_out/final_runs/_scheduler/logs/
+/result_out/final_timing/
+/result_out/final_timing_baseline/
+/result_out/reviewer_baselines_nano_tm/
+/result_out/clean_run_validation/
+/result_out/ablate_tm/
+/result_out/fpca_dim_sweep_tm_outputs/
+/result_out/retro_acq_runs_tm/
+/result_out/mtm_examples_runs/
+/result_out/tm_examples_runs/
+/result_out/mf_sweep_runs_baseline_nano_tm/
+
+# Frozen manifests include absolute local paths and GPU execution details.
+/result_out/final_runs/_scheduler/task_manifest.csv
+/result_out/final_runs/_scheduler/task_manifest.json
+/result_out/final_runs/_scheduler/scheduler_summary.json
+
+# Compact audit/figure-source CSVs containing absolute local source paths;
+# publish sanitized copies separately without changing frozen values.
+/result_out/final_analysis/result_inventory.csv
+/result_out/final_analysis/figures/fpca_dim_sweep_native_seed_values.csv
+
+# Internal release audits and staging plan, retained locally.
+/REPO_CLEANUP_AUDIT.md
+/REPO_CLEANUP_PHASE2_REPORT.md
+/PUBLIC_RELEASE_PLAN.md
+
+/RELEASE_REAUDIT_REPORT.md
+/mf_neural_gp_ec_inventory_*.txt
+/nohup.out
+
+# Local/internal pre-release audit and experiment drafts
+/result_out/final_experiment_matrix_draft.csv
+/result_out/final_experiment_protocol_draft.md
+/result_out/final_pre_gpu_code_audit.md

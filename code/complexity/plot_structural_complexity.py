@@ -1,24 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Structural complexity figures (split into two separate images):
+Structural diagnostics of the LF-to-HF latent mapping.
 
-1) lme_vs_hf.png
-   - LME vs HF budget
+This script computes, from paired training data:
+1) Linear mapping error (LME)
+2) Effective rank of the LF-to-HF latent linear map A
 
-2) effective_rank_vs_hf.png
-   - Effective rank of A vs HF budget
-   - Includes rank-1 reference line
-   - Annotates the value at HF budget = 200 for the Transmission curve
-     (or falls back to the Transmission maximum if HF=200 is unavailable)
+For each HF budget, statistics are aggregated across
+m_LF = 5, 10, and 15 using sample mean ± sample standard deviation.
 
-This version is intended for cases where the two panels will be combined manually later,
-so it does NOT add "(a)" / "(b)" labels inside the figures.
+The two diagnostics are shown in one 1x2 publication figure:
+(a) LME vs HF budget
+(b) Effective rank vs HF budget
+
+No trained predictor is required.
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -309,56 +311,31 @@ def aggregate_over_lfx(metrics: List[Metrics]) -> Dict[int, Dict[str, Tuple[floa
 # -----------------------------
 # Plot helpers
 # -----------------------------
+# -----------------------------
+# Plot helpers
+# -----------------------------
 def _annotate_rank_point(ax, x: float, y: float, color: str) -> None:
+    """Annotate the representative Transmission effective-rank point."""
     ax.scatter([x], [y], s=28, color=color, zorder=5)
     ax.annotate(
         f"{y:.2f}",
         xy=(x, y),
-        xytext=(0, 8),
+        xytext=(0, 4),
         textcoords="offset points",
         ha="center",
         va="bottom",
         fontsize=11,
         color=color,
+        clip_on=False,
     )
 
 
-def plot_lme_figure(
+def plot_structural_complexity_figure(
     hfs: List[int],
     absb_lme_m: np.ndarray,
     absb_lme_s: np.ndarray,
     tmst_lme_m: np.ndarray,
     tmst_lme_s: np.ndarray,
-    out_path: Path,
-) -> None:
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-
-    apply_npj_style()
-    fig, ax = plt.subplots(1, 1, figsize=(5.2, 4.2))
-
-    ax.errorbar(
-        hfs, absb_lme_m, yerr=absb_lme_s,
-        marker="o", capsize=3, color=COLOR_ABS,
-        label=ds_legend("absb")
-    )
-    ax.errorbar(
-        hfs, tmst_lme_m, yerr=tmst_lme_s,
-        marker="o", capsize=3, color=COLOR_TRANS,
-        label=ds_legend("tmst")
-    )
-
-    ax.set_xlabel(r"HF budget $N_h$")
-    ax.set_ylabel("LME")
-    ax.grid(True, alpha=0.25)
-    ax.legend(frameon=True, loc="best")
-
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=200, bbox_inches="tight")
-    plt.close(fig)
-
-
-def plot_effective_rank_figure(
-    hfs: List[int],
     absb_rk_m: np.ndarray,
     absb_rk_s: np.ndarray,
     tmst_rk_m: np.ndarray,
@@ -368,40 +345,160 @@ def plot_effective_rank_figure(
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     apply_npj_style()
-    fig, ax = plt.subplots(1, 1, figsize=(5.2, 4.2))
 
-    ax.errorbar(
-        hfs, absb_rk_m, yerr=absb_rk_s,
-        marker="o", capsize=3, color=COLOR_ABS,
-        label=ds_legend("absb")
-    )
-    ax.errorbar(
-        hfs, tmst_rk_m, yerr=tmst_rk_s,
-        marker="o", capsize=3, color=COLOR_TRANS,
-        label=ds_legend("tmst")
-    )
-    ax.axhline(
-        1.0, linestyle="--", linewidth=1.2,
-        alpha=0.9, color=COLOR_REF,
-        label="Rank-1 reference"
+    fig, (ax_lme, ax_rank) = plt.subplots(
+        1, 2,
+        figsize=(10.6, 4.25),
     )
 
-    # annotate the Transmission point at HF=200 if present;
-    # otherwise fall back to the Transmission maximum
+    # --------------------------------------------------------
+    # (a) Linear mapping error
+    # --------------------------------------------------------
+    ax_lme.errorbar(
+        hfs,
+        absb_lme_m,
+        yerr=absb_lme_s,
+        marker="o",
+        capsize=3,
+        color=COLOR_ABS,
+        label=ds_legend("absb"),
+    )
+    ax_lme.errorbar(
+        hfs,
+        tmst_lme_m,
+        yerr=tmst_lme_s,
+        marker="o",
+        capsize=3,
+        color=COLOR_TRANS,
+        label=ds_legend("tmst"),
+    )
+
+    ax_lme.set_xlabel(r"HF budget $N_h$")
+    ax_lme.set_ylabel("LME")
+    ax_lme.grid(False)
+    ax_lme.legend(
+        frameon=False,
+        loc="lower right",
+    )
+
+    ax_lme.text(
+        -0.10,
+        1.03,
+        "(a)",
+        transform=ax_lme.transAxes,
+        ha="left",
+        va="bottom",
+        fontsize=13,
+        fontweight="bold",
+    )
+
+    # --------------------------------------------------------
+    # (b) Effective rank
+    # --------------------------------------------------------
+    ax_rank.errorbar(
+        hfs,
+        absb_rk_m,
+        yerr=absb_rk_s,
+        marker="o",
+        capsize=3,
+        color=COLOR_ABS,
+        label=ds_legend("absb"),
+    )
+    ax_rank.errorbar(
+        hfs,
+        tmst_rk_m,
+        yerr=tmst_rk_s,
+        marker="o",
+        capsize=3,
+        color=COLOR_TRANS,
+        label=ds_legend("tmst"),
+    )
+
+    ax_rank.axhline(
+        1.0,
+        linestyle="--",
+        linewidth=1.2,
+        alpha=0.9,
+        color=COLOR_REF,
+        label="Rank-1 reference",
+    )
+
+    # Representative Transmission point:
+    # use HF=200 when available, otherwise use its maximum.
     hfs_arr = np.asarray(hfs, dtype=int)
+
     if np.any(hfs_arr == 200):
         idx = int(np.where(hfs_arr == 200)[0][0])
     else:
         idx = int(np.nanargmax(tmst_rk_m))
-    _annotate_rank_point(ax, float(hfs_arr[idx]), float(tmst_rk_m[idx]), COLOR_TRANS)
 
-    ax.set_xlabel(r"HF budget $N_h$")
-    ax.set_ylabel(r"Effective rank")
-    ax.grid(True, alpha=0.25)
-    ax.legend(frameon=True, loc="best")
+    x_ann = float(hfs_arr[idx])
+    y_ann = float(tmst_rk_m[idx])
 
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=200, bbox_inches="tight")
+    _annotate_rank_point(
+        ax_rank,
+        x_ann,
+        y_ann,
+        COLOR_TRANS,
+    )
+
+    # Explicit headroom so the "2.23" annotation does not touch the frame.
+    upper_candidates = np.concatenate([
+        absb_rk_m + absb_rk_s,
+        tmst_rk_m + tmst_rk_s,
+    ])
+    upper = float(np.nanmax(upper_candidates))
+    lower = min(
+        0.95,
+        float(np.nanmin([
+            np.nanmin(absb_rk_m - absb_rk_s),
+            np.nanmin(tmst_rk_m - tmst_rk_s),
+        ])),
+    )
+
+    ax_rank.set_ylim(
+        lower,
+        upper + 0.10,
+    )
+
+    ax_rank.set_xlabel(r"HF budget $N_h$")
+    ax_rank.set_ylabel("Effective rank")
+    ax_rank.grid(False)
+    ax_rank.legend(
+        frameon=False,
+        loc="upper right",
+    )
+
+    ax_rank.text(
+        -0.10,
+        1.03,
+        "(b)",
+        transform=ax_rank.transAxes,
+        ha="left",
+        va="bottom",
+        fontsize=13,
+        fontweight="bold",
+    )
+
+    fig.subplots_adjust(
+        left=0.09,
+        right=0.985,
+        bottom=0.17,
+        top=0.93,
+        wspace=0.30,
+    )
+
+    # PNG 300 dpi + vector PDF
+    fig.savefig(
+        out_path,
+        dpi=300,
+        bbox_inches="tight",
+    )
+    fig.savefig(
+        out_path.with_suffix(".pdf"),
+        bbox_inches="tight",
+    )
+
     plt.close(fig)
 
 
@@ -412,52 +509,90 @@ def main():
     ap = argparse.ArgumentParser()
 
     ap.add_argument(
-        "--absb_root", type=str,
-        default="../../data/mf_sweep_datasets_nano_ab",
-        help="Root directory containing absorption hf*_lfx* folders."
+        "--absb_root",
+        type=str,
+        default="data/mf_sweep_datasets_nano_ab",
+        help="Root directory containing absorption hf*_lfx* folders.",
     )
     ap.add_argument(
-        "--tmst_root", type=str,
-        default="../../data/mf_sweep_datasets_nano_tm",
-        help="Root directory containing transmission hf*_lfx* folders."
-    )
-
-    ap.add_argument(
-        "--splits", type=str, default="train",
-        help="Comma-separated splits to concatenate, e.g. 'train' or 'train,val,dev'."
+        "--tmst_root",
+        type=str,
+        default="data/mf_sweep_datasets_nano_tm",
+        help="Root directory containing transmission hf*_lfx* folders.",
     )
 
     ap.add_argument(
-        "--r_latent", type=int, default=32,
-        help="Latent dimension for PCA (used for A, LME, eff_rank)."
-    )
-    ap.add_argument(
-        "--ridge", type=float, default=1e-6,
-        help="Ridge regularization for estimating A."
+        "--splits",
+        type=str,
+        default="train",
+        help="Comma-separated splits to concatenate.",
     )
 
     ap.add_argument(
-        "--out_dir", type=str,
-        default="../../result_out/structural_complexity_split",
-        help="Output directory for the two separate images."
+        "--r_latent",
+        type=int,
+        default=32,
+        help="Latent dimension for PCA.",
     )
     ap.add_argument(
-        "--out_lme", type=str, default="lme_vs_hf.png",
-        help="Filename for the LME figure."
+        "--ridge",
+        type=float,
+        default=1e-6,
+        help="Ridge regularization for estimating A.",
+    )
+
+    ap.add_argument(
+        "--out_dir",
+        type=str,
+        default="result_out/final_analysis/figures",
+        help="Output directory.",
     )
     ap.add_argument(
-        "--out_rank", type=str, default="effective_rank_vs_hf.png",
-        help="Filename for the effective-rank figure."
+        "--source_csv",
+        type=str,
+        default="result_out/final_analysis/frozen_inputs/structural/fig_structural_complexity_data.csv",
+        help="Compact figure-source CSV. If present, redraw without prepared datasets.",
+    )
+    ap.add_argument(
+        "--out_fig",
+        type=str,
+        default="fig_structural_complexity.png",
+        help="Composite figure filename.",
     )
 
     args = ap.parse_args()
 
     absb_root = Path(args.absb_root)
     tmst_root = Path(args.tmst_root)
-    splits = [s.strip() for s in args.splits.split(",") if s.strip()]
-    out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
 
+    splits = [
+        x.strip()
+        for x in args.splits.split(",")
+        if x.strip()
+    ]
+
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+    source_csv = Path(args.source_csv) if args.source_csv else None
+    if source_csv is not None and source_csv.is_file():
+        frozen = np.genfromtxt(source_csv, delimiter=",", names=True)
+        hfs = frozen["hf_budget"].astype(int).tolist()
+        plot_structural_complexity_figure(
+            hfs, frozen["abs_lme_mean"], frozen["abs_lme_sd"],
+            frozen["tm_lme_mean"], frozen["tm_lme_sd"],
+            frozen["abs_rank_mean"], frozen["abs_rank_sd"],
+            frozen["tm_rank_mean"], frozen["tm_rank_sd"],
+            out_dir / args.out_fig,
+        )
+        print(f"[INFO] frozen source: {source_csv.resolve()}")
+        return
+
+    # --------------------------------------------------------
+    # Compute metrics
+    # --------------------------------------------------------
     absb_dirs = parse_mf_dirs(absb_root)
     tmst_dirs = parse_mf_dirs(tmst_root)
 
@@ -483,46 +618,97 @@ def main():
             )
         )
 
-    absb_ag = aggregate_over_lfx(absb_metrics)
-    tmst_ag = aggregate_over_lfx(tmst_metrics)
+    absb_agg = aggregate_over_lfx(absb_metrics)
+    tmst_agg = aggregate_over_lfx(tmst_metrics)
 
-    hfs = sorted(set(absb_ag.keys()) & set(tmst_ag.keys()))
+    hfs = sorted(
+        set(absb_agg.keys())
+        & set(tmst_agg.keys())
+    )
+
     if not hfs:
-        raise RuntimeError("No overlapping HF budgets between absb and tmst roots.")
+        raise RuntimeError(
+            "No common HF budgets found between AB and TM."
+        )
 
-    def series(ag, key):
-        mean = np.array([ag[h][key][0] for h in hfs], float)
-        std = np.array([ag[h][key][1] for h in hfs], float)
-        return mean, std
+    def values(
+        agg: Dict[int, Dict[str, Tuple[float, float]]],
+        key: str,
+        which: int,
+    ) -> np.ndarray:
+        return np.asarray(
+            [agg[h][key][which] for h in hfs],
+            dtype=float,
+        )
 
-    absb_lme_m, absb_lme_s = series(absb_ag, "lme")
-    tmst_lme_m, tmst_lme_s = series(tmst_ag, "lme")
-    absb_rk_m, absb_rk_s = series(absb_ag, "rank")
-    tmst_rk_m, tmst_rk_s = series(tmst_ag, "rank")
+    # mean
+    absb_lme_m = values(absb_agg, "lme", 0)
+    tmst_lme_m = values(tmst_agg, "lme", 0)
 
-    out_lme = out_dir / args.out_lme
-    out_rank = out_dir / args.out_rank
+    absb_rk_m = values(absb_agg, "rank", 0)
+    tmst_rk_m = values(tmst_agg, "rank", 0)
 
-    plot_lme_figure(
+    # sample SD across LF multipliers
+    absb_lme_s = values(absb_agg, "lme", 1)
+    tmst_lme_s = values(tmst_agg, "lme", 1)
+
+    absb_rk_s = values(absb_agg, "rank", 1)
+    tmst_rk_s = values(tmst_agg, "rank", 1)
+
+    if source_csv is not None:
+        source_csv.parent.mkdir(parents=True, exist_ok=True)
+        fields = ["hf_budget", "abs_lme_mean", "abs_lme_sd", "tm_lme_mean", "tm_lme_sd", "abs_rank_mean", "abs_rank_sd", "tm_rank_mean", "tm_rank_sd"]
+        with source_csv.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fields)
+            writer.writeheader()
+            for i, hf in enumerate(hfs):
+                writer.writerow(dict(zip(fields, [hf, absb_lme_m[i], absb_lme_s[i], tmst_lme_m[i], tmst_lme_s[i], absb_rk_m[i], absb_rk_s[i], tmst_rk_m[i], tmst_rk_s[i]])))
+
+    print(
+        "[INFO] HF budgets:",
+        hfs,
+    )
+    print(
+        "[INFO] aggregation: sample mean ± sample SD "
+        "across LF multipliers"
+    )
+    print(
+        "[INFO] r_latent:",
+        args.r_latent,
+    )
+    print(
+        "[INFO] ridge:",
+        args.ridge,
+    )
+    print(
+        "[INFO] splits:",
+        splits,
+    )
+
+    out_path = out_dir / args.out_fig
+
+    plot_structural_complexity_figure(
         hfs=hfs,
+
         absb_lme_m=absb_lme_m,
         absb_lme_s=absb_lme_s,
         tmst_lme_m=tmst_lme_m,
         tmst_lme_s=tmst_lme_s,
-        out_path=out_lme,
-    )
 
-    plot_effective_rank_figure(
-        hfs=hfs,
         absb_rk_m=absb_rk_m,
         absb_rk_s=absb_rk_s,
         tmst_rk_m=tmst_rk_m,
         tmst_rk_s=tmst_rk_s,
-        out_path=out_rank,
+
+        out_path=out_path,
     )
 
-    print(f"[SAVE] {out_lme.resolve()}")
-    print(f"[SAVE] {out_rank.resolve()}")
+    print(
+        f"[SAVE] {out_path.resolve()}"
+    )
+    print(
+        f"[SAVE] {out_path.with_suffix('.pdf').resolve()}"
+    )
 
 
 if __name__ == "__main__":

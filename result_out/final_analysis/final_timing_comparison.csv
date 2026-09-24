@@ -1,0 +1,18 @@
+TM setting,HF train count,LF train count,method,method role,training time seconds,training time minutes,inference time seconds,Neural-GP / comparator training-time ratio,Neural-GP training-time reduction percent,training KPI components,canonical source
+hf50_lfx10,40,400,HF-only,main baseline,370.346134,6.172436,0.070637,1.020997,-2.099659,stage2_train_s.hf_only,result_out/final_timing_baseline/hf50_lfx10_seed42/timing_tm/timing.json
+hf50_lfx10,40,400,AR1 / co-kriging,main baseline,735.002128,12.250035,0.139095,0.514450,48.554960,stage2_train_s.ar1_total,result_out/final_timing_baseline/hf50_lfx10_seed42/timing_tm/timing.json
+hf50_lfx10,40,400,Neural-GP MF,proposed method,378.122140,6.302036,0.079665,,,stage1_train_s + stage2_train_s.mf_student,result_out/final_timing_baseline/hf50_lfx10_seed42/timing_tm/ours/timing.json
+hf50_lfx10,40,400,FPCA-NARGP,main baseline,835.719053,13.928651,68.843143,0.452451,54.754874,stage1_train_s + stage2_train_s,result_out/final_timing/fpca_nargp_hf50_lfx10_seed42/timing.json
+hf50_lfx10,40,400,MF-DeepONet,main baseline,138.233827,2.303897,0.046300,2.735381,-173.538068,stage_i_lf_training_seconds + stage_ii_hf_correction_training_seconds,result_out/final_timing/mf_deeponet_hf50_lfx10_seed42/timing.json
+hf100_lfx10,80,800,HF-only,main baseline,341.557943,5.692632,0.068700,1.008809,-0.880883,stage2_train_s.hf_only,result_out/final_timing_baseline/hf100_lfx10_seed42/timing_tm/timing.json
+hf100_lfx10,80,800,AR1 / co-kriging,main baseline,684.918308,11.415305,0.136778,0.503077,49.692297,stage2_train_s.ar1_total,result_out/final_timing_baseline/hf100_lfx10_seed42/timing_tm/timing.json
+hf100_lfx10,80,800,Neural-GP MF,proposed method,344.566670,5.742778,0.077911,,,stage1_train_s + stage2_train_s.mf_student,result_out/final_timing_baseline/hf100_lfx10_seed42/timing_tm/ours/timing.json
+hf100_lfx10,80,800,FPCA-NARGP,main baseline,850.685512,14.178092,69.685379,0.405046,59.495411,stage1_train_s + stage2_train_s,result_out/final_timing/fpca_nargp_hf100_lfx10_seed42/timing.json
+hf100_lfx10,80,800,MF-DeepONet,main baseline,216.186491,3.603108,0.059396,1.593840,-59.383997,stage_i_lf_training_seconds + stage_ii_hf_correction_training_seconds,result_out/final_timing/mf_deeponet_hf100_lfx10_seed42/timing.json
+hf100_lfx10,80,800,Direct-latent,representation ablation,355.405212,5.923420,0.097271,,,stage1_train_s + stage2_train_s,result_out/final_timing/direct_latent_hf100_lfx10_seed42/timing.json
+hf100_lfx10,80,800,Frequency-wise NARGP,computational diagnostic,67878.075856,1131.301264,2961.006505,,,stage1_train_s + stage2_train_s,result_out/final_timing/freqwise_nargp_hf100_lfx10_seed42/timing.json
+hf500_lfx10,400,4000,HF-only,main baseline,343.923123,5.732052,0.077820,1.036224,-3.622403,stage2_train_s.hf_only,result_out/final_timing_baseline/hf500_lfx10_seed42/timing_tm/timing.json
+hf500_lfx10,400,4000,AR1 / co-kriging,main baseline,692.966388,11.549440,0.131833,0.514284,48.571618,stage2_train_s.ar1_total,result_out/final_timing_baseline/hf500_lfx10_seed42/timing_tm/timing.json
+hf500_lfx10,400,4000,Neural-GP MF,proposed method,356.381403,5.939690,0.078902,,,stage1_train_s + stage2_train_s.mf_student,result_out/final_timing_baseline/hf500_lfx10_seed42/timing_tm/ours/timing.json
+hf500_lfx10,400,4000,FPCA-NARGP,main baseline,846.664132,14.111069,69.226841,0.420924,57.907582,stage1_train_s + stage2_train_s,result_out/final_timing/fpca_nargp_hf500_lfx10_seed42/timing.json
+hf500_lfx10,400,4000,MF-DeepONet,main baseline,1575.489529,26.258159,0.221210,0.226204,77.379640,stage_i_lf_training_seconds + stage_ii_hf_correction_training_seconds,result_out/final_timing/mf_deeponet_hf500_lfx10_seed42/timing.json

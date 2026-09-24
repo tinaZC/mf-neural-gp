@@ -24,6 +24,9 @@ from typing import Dict, Tuple, List
 import numpy as np
 import matplotlib.pyplot as plt
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+FROZEN_ROOT = REPO_ROOT / "result_out/final_analysis/frozen_inputs/efficiency"
+
 
 # ===== unified npj-style figure settings =====
 COLOR_HF = "#0072B2"        # blue
@@ -41,7 +44,7 @@ def apply_npj_style() -> None:
         "axes.titlesize": 12,
         "xtick.labelsize": 11,
         "ytick.labelsize": 11,
-        "legend.fontsize": 9,
+        "legend.fontsize": 10,
         "figure.titlesize": 12,
         "axes.linewidth": 0.8,
         "lines.linewidth": 1.8,
@@ -111,22 +114,22 @@ def main() -> None:
     ap.add_argument(
         "--npz_5",
         type=str,
-        default="../../result_out/mf_sweep_runs_baseline_nano_tm/efficiency_out/efficiency_out_lfx05/speedup_curves.npz",
+        default=str(FROZEN_ROOT / "lfx05_speedup_curves.npz"),
     )
     ap.add_argument(
         "--npz_10",
         type=str,
-        default="../../result_out/mf_sweep_runs_baseline_nano_tm/efficiency_out/efficiency_out_lfx10/speedup_curves.npz",
+        default=str(FROZEN_ROOT / "lfx10_speedup_curves.npz"),
     )
     ap.add_argument(
         "--npz_15",
         type=str,
-        default="../../result_out/mf_sweep_runs_baseline_nano_tm/efficiency_out/efficiency_out_lfx15/speedup_curves.npz",
+        default=str(FROZEN_ROOT / "lfx15_speedup_curves.npz"),
     )
     ap.add_argument(
         "--out_dir",
         type=str,
-        default="../../result_out/mf_sweep_runs_baseline_nano_tm/efficiency_out_multi",
+        default=str(REPO_ROOT / "result_out/final_analysis/figures"),
     )
     ap.add_argument("--xlabel", type=str, default="Target RMSE")
     ap.add_argument("--x_invert", type=int, default=1)
@@ -229,8 +232,8 @@ def main() -> None:
     axb.set_xlabel(args.xlabel)
     axa.set_ylabel("HF-call speedup (×)")
     axb.set_ylabel("Simulation-time speedup (×)")
-    axa.grid(True, alpha=0.3)
-    axb.grid(True, alpha=0.3)
+    axa.grid(False)
+    axb.grid(False)
 
     if args.x_invert:
         axa.invert_xaxis()
@@ -257,7 +260,7 @@ def main() -> None:
 
     handles, labs = axa.get_legend_handles_labels()
     if handles:
-        axa.legend(handles, labs, loc="upper left", frameon=False, fontsize=9)
+        axa.legend(handles, labs, loc="upper left", frameon=False, fontsize=10)
 
     # Put panel labels outside the subplot frames
     add_panel_note_outside(fig, axa, "(a)", dx=-0.018, dy=0.012, fontsize=11)
@@ -287,8 +290,12 @@ def main() -> None:
 
     out_png = out_dir / "efficiency_multi_lfx.png"
     out_pdf = out_dir / "efficiency_multi_lfx.pdf"
+    manuscript_png = out_dir / "_fig_efficiency.png"
+    manuscript_pdf = out_dir / "_fig_efficiency.pdf"
     fig.savefig(out_png, dpi=int(args.dpi))
     fig.savefig(out_pdf)
+    fig.savefig(manuscript_png, dpi=int(args.dpi))
+    fig.savefig(manuscript_pdf)
     plt.close(fig)
 
     print(f"[DONE] wrote: {out_png}")
