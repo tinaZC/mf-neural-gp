@@ -313,6 +313,29 @@ def _draw_hollow_marker(ax, x, y, color):
     )
 
 
+
+def plotted_error(row, metric):
+    diagnostic = row["role"] == "computational diagnostic"
+    expected_n = 3 if diagnostic else 20
+    if row["n"] != expected_n:
+        raise ValueError(
+            f"{row['method']}: expected n={expected_n}, got {row['n']}"
+        )
+
+    if diagnostic:
+        sd = row[f"{metric}_std"]
+        if not math.isfinite(sd) or sd < 0:
+            raise ValueError(f"Invalid SD: {row['method']} {metric}")
+        return [[sd], [sd]]
+
+    mean = row[f"{metric}_mean"]
+    lower = mean - row[f"{metric}_ci_low"]
+    upper = row[f"{metric}_ci_high"] - mean
+    if not all(math.isfinite(v) and v >= 0 for v in (lower, upper)):
+        raise ValueError(f"Invalid CI: {row['method']} {metric}")
+    return [[lower], [upper]]
+
+
 def plot(rows):
     plt.rcParams.update(
         {
@@ -328,14 +351,14 @@ def plot(rows):
         }
     )
 
-    fig, (ax_nll, ax_trade) = plt.subplots(1, 2, figsize=(11.2, 4.4), layout="constrained")
+    fig, (ax_nll, ax_trade) = plt.subplots(1, 2, figsize=(12.0, 4.8), layout="constrained", gridspec_kw={"width_ratios": [1.2, 1.0]})
 
     for i, row in enumerate(rows):
         diagnostic = row["role"] == "computational diagnostic"
 
-        nll_yerr = [[row["nll_mean"] - row["nll_ci_low"]], [row["nll_ci_high"] - row["nll_mean"]]]
-        width_xerr = [[row["width_mean"] - row["width_ci_low"]], [row["width_ci_high"] - row["width_mean"]]]
-        coverage_yerr = [[row["coverage_mean"] - row["coverage_ci_low"]], [row["coverage_ci_high"] - row["coverage_mean"]]]
+        nll_yerr = plotted_error(row, "nll")
+        width_xerr = plotted_error(row, "width")
+        coverage_yerr = plotted_error(row, "coverage")
 
         if diagnostic:
             # CI first, marker second. White face hides the CI crossing at the mean,
@@ -407,8 +430,8 @@ def plot(rows):
             "HF-only",
             "AR1/\nco-kriging",
             "FPCA-\nNARGP",
-            "Wavelength-wise\nStage II",
-            "Wavelength-wise\nNARGP",
+            "Wavelength-\nwise\nStage II",
+            "Wavelength-\nwise\nNARGP",
             "Neural-GP\nMF",
         ),
     )
@@ -443,12 +466,13 @@ def plot(rows):
                 markeredgecolor=row["color"],
                 markeredgewidth=1.5 if diagnostic else 1.0,
                 markersize=5,
-                label=row["method"],
+                label=row["method"] + (" (n=3, ±SD)" if diagnostic else " (n=20, 95% CI)"),
             )
         )
 
     ax_trade.legend(
         handles=legend_handles,
+        fontsize=8,
         loc="lower left",
         frameon=False,
         handletextpad=0.7,
@@ -520,6 +544,20 @@ def main():
         "png": FIGURES / "_fig_native_uq.png",
         "csv": FIGURES / "native_uq_data.csv",
     }
+
+    print("\n[PLOTTED ERROR BARS]")
+    for row in rows:
+        diagnostic = row["role"] == "computational diagnostic"
+        kind = "mean ± sample SD" if diagnostic else "95% CI of mean"
+        print(f"{row['method']} (n={row['n']}): {kind}")
+        for metric in METRICS:
+            err = plotted_error(row, metric)
+            mean = row[f"{metric}_mean"]
+            print(
+                f"  {metric}: mean={mean:.10g}, "
+                f"bounds=[{mean-err[0][0]:.10g}, "
+                f"{mean+err[1][0]:.10g}]"
+            )
 
     fig = plot(rows)
 
